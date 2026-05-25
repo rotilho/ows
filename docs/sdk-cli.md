@@ -22,7 +22,7 @@ cargo build --workspace --release
 
 ### `ows wallet create`
 
-Create a new wallet. Generates a BIP-39 mnemonic and derives addresses for all supported chains.
+Create a new wallet. Generates a BIP-39 mnemonic and derives addresses for all supported chains, including Atto (`atto:live`) once the Atto signer/address path is enabled.
 
 ```bash
 ows wallet create --name "my-wallet"
@@ -45,6 +45,7 @@ Created wallet 3198bc9c-...
   cosmos:cosmoshub-4                     cosmos1... m/44'/118'/0'/0/0
   tron:mainnet                           TKLm...    m/44'/195'/0'/0/0
   xrpl:mainnet                           rHsM...    m/44'/144'/0'/0/0
+  atto:live                              atto://... m/44'/1869902945'/0'
 ```
 
 ### `ows wallet import`
@@ -77,7 +78,7 @@ OWS_ED25519_KEY="9d61b19d..." \
 | `OWS_SECP256K1_KEY` | Explicit secp256k1 private key via environment variable |
 | `OWS_ED25519_KEY` | Explicit Ed25519 private key via environment variable |
 
-Private key imports generate all 9 chain accounts: the provided key is used for its curve's chains, and a random key is generated for the other curve. Use `OWS_SECP256K1_KEY` and `OWS_ED25519_KEY` together to supply both keys explicitly.
+Private key imports generate accounts for all supported chain families: the provided key is used for its curve's chains, and a random key is generated for the other curve. Use `OWS_SECP256K1_KEY` and `OWS_ED25519_KEY` together to supply both keys explicitly.
 
 ### `ows wallet export`
 
