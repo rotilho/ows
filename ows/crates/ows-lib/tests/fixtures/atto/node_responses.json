@@ -1,0 +1,52 @@
+{
+  "account": {
+    "publicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+    "network": "LIVE",
+    "version": 0,
+    "algorithm": "V1",
+    "height": "1",
+    "balance": "1000000000",
+    "lastTransactionHash": "9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C",
+    "lastTransactionTimestamp": 1767390950976,
+    "representativeAlgorithm": "V1",
+    "representativePublicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+    "representativeAddress": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw",
+    "address": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw"
+  },
+  "receivables": [
+    {
+      "network": "LIVE",
+      "hash": "9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C",
+      "version": 0,
+      "algorithm": "V1",
+      "publicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+      "timestamp": 1767390950976,
+      "receiverAlgorithm": "V1",
+      "receiverPublicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+      "amount": "1",
+      "receiverAddress": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw",
+      "address": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw"
+    },
+    {
+      "network": "LIVE",
+      "hash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "version": 0,
+      "algorithm": "V1",
+      "publicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+      "timestamp": 1767390951976,
+      "receiverAlgorithm": "V1",
+      "receiverPublicKey": "44C8865188D6FBE1C084436FF2E08D34538BA0FB2FCB1A8FA76F8127CCF6A281",
+      "amount": "2",
+      "receiverAddress": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw",
+      "address": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw"
+    }
+  ],
+  "instant": { "clientInstant": 1767390950000, "serverInstant": 1767390950100, "differenceMillis": 100 },
+  "publish_stream_transaction": {
+    "block": { "type": "SEND", "hash": "9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C" },
+    "signature": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "work": "8E9C4A839AB702AF",
+    "address": "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw"
+  },
+  "publish_error": { "error": "bad transaction" }
+}
