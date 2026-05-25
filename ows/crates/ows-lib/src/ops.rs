@@ -268,8 +268,15 @@ pub fn import_wallet_mnemonic(
 /// Decode a hex-encoded key, stripping an optional `0x` prefix.
 fn decode_hex_key(hex_str: &str) -> Result<Vec<u8>, OwsLibError> {
     let trimmed = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-    hex::decode(trimmed)
-        .map_err(|e| OwsLibError::InvalidInput(format!("invalid hex private key: {e}")))
+    let key = hex::decode(trimmed)
+        .map_err(|e| OwsLibError::InvalidInput(format!("invalid hex private key: {e}")))?;
+    if key.len() != 32 {
+        return Err(OwsLibError::InvalidInput(format!(
+            "private keys must be exactly 32 bytes, got {}",
+            key.len()
+        )));
+    }
+    Ok(key)
 }
 
 /// Import a wallet from a hex-encoded private key.
@@ -1131,6 +1138,8 @@ mod tests {
     }
 
     const TEST_PRIVKEY: &str = "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318";
+    const TEST_ATTO_ED25519_PRIVKEY: &str =
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
 
     fn save_allowed_chains_policy(vault: &Path, id: &str, chain_ids: Vec<String>) {
         let policy = ows_core::Policy {
@@ -1186,10 +1195,14 @@ mod tests {
         let phrase = generate_mnemonic(12).unwrap();
         let chains = [
             "evm", "solana", "bitcoin", "cosmos", "tron", "ton", "sui", "xrpl", "nano", "near",
+            "atto",
         ];
         for chain in &chains {
             let addr = derive_address(&phrase, chain, None).unwrap();
             assert!(!addr.is_empty(), "address should be non-empty for {chain}");
+            if *chain == "atto" {
+                assert!(addr.starts_with("atto://"));
+            }
         }
     }
 
@@ -1248,6 +1261,18 @@ mod tests {
             .expect("Atto account should be derived for new wallets");
         assert!(atto_account.address.starts_with("atto://"));
         assert_eq!(atto_account.derivation_path, "m/44'/1869902945'/0'");
+        let expected_atto_account_id = format!("atto:live:{}", atto_account.address);
+
+        let stored = vault::load_wallet_by_name_or_id("w1", Some(v1.path())).unwrap();
+        let stored_atto = stored
+            .accounts
+            .iter()
+            .find(|acct| acct.chain_id == "atto:live")
+            .expect("Atto account should persist in wallet JSON");
+        assert_eq!(
+            stored_atto.account_id, expected_atto_account_id,
+            "Atto account IDs must persist as chain_id:atto://..."
+        );
 
         // Export mnemonic
         let phrase = export_wallet("w1", None, Some(v1.path())).unwrap();
@@ -2286,6 +2311,118 @@ mod tests {
         let sig = sign_transaction("char-pk", "evm", "deadbeef", None, None, Some(vault)).unwrap();
         assert!(!sig.signature.is_empty());
         assert!(sig.recovery_id.is_some());
+    }
+
+    #[test]
+    fn atto_private_key_import_uses_ed25519_without_corrupting_secp256k1() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path();
+        let expected_atto = signer_for_chain(ChainType::Atto)
+            .derive_address(&hex::decode(TEST_ATTO_ED25519_PRIVKEY).unwrap())
+            .unwrap();
+
+        let wallet = import_wallet_private_key(
+            "atto-pk",
+            TEST_ATTO_ED25519_PRIVKEY,
+            Some("atto"),
+            Some("pass"),
+            Some(vault),
+            Some(TEST_PRIVKEY),
+            None,
+        )
+        .unwrap();
+
+        let atto_account = wallet
+            .accounts
+            .iter()
+            .find(|acct| acct.chain_id == "atto:live")
+            .expect("Atto account should be present for private-key imports");
+        assert_eq!(atto_account.address, expected_atto);
+        let stored = vault::load_wallet_by_name_or_id("atto-pk", Some(vault)).unwrap();
+        let stored_atto = stored
+            .accounts
+            .iter()
+            .find(|acct| acct.chain_id == "atto:live")
+            .expect("Atto account should persist for private-key imports");
+        assert_eq!(
+            stored_atto.account_id,
+            format!("atto:live:{}", expected_atto)
+        );
+
+        let atto_sig = sign_message(
+            "atto-pk",
+            "atto",
+            "atto import test",
+            Some("pass"),
+            None,
+            None,
+            Some(vault),
+        )
+        .unwrap();
+        assert!(!atto_sig.signature.is_empty());
+        assert!(atto_sig.recovery_id.is_none());
+
+        let evm_sig = sign_transaction(
+            "atto-pk",
+            "base",
+            "deadbeef",
+            Some("pass"),
+            None,
+            Some(vault),
+        )
+        .unwrap();
+        assert!(!evm_sig.signature.is_empty());
+        assert!(evm_sig.recovery_id.is_some());
+    }
+
+    #[test]
+    fn atto_allowed_chains_policy_allows_and_denies_canonical_chain_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        let wallet = create_wallet("atto-policy", None, None, Some(vault)).unwrap();
+        save_allowed_chains_policy(vault, "atto-only", vec!["atto:live".to_string()]);
+
+        let (token, _) = crate::key_ops::create_api_key(
+            "atto-policy-key",
+            std::slice::from_ref(&wallet.id),
+            &["atto-only".to_string()],
+            "",
+            None,
+            Some(vault),
+        )
+        .unwrap();
+
+        let allowed = sign_message(
+            &wallet.id,
+            "atto",
+            "policy allows canonical Atto",
+            Some(&token),
+            None,
+            None,
+            Some(vault),
+        );
+        assert!(
+            allowed.is_ok(),
+            "Atto allowlist should pass: {:?}",
+            allowed.err()
+        );
+
+        let denied = sign_message(
+            &wallet.id,
+            "base",
+            "policy denies non-Atto",
+            Some(&token),
+            None,
+            None,
+            Some(vault),
+        );
+        match denied.unwrap_err() {
+            OwsLibError::Core(OwsError::PolicyDenied { reason, .. }) => {
+                assert!(reason.contains("eip155:8453"));
+                assert!(reason.contains("not in allowlist"));
+            }
+            other => panic!("expected PolicyDenied, got: {other}"),
+        }
     }
 
     #[test]
