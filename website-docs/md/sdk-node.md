@@ -14,6 +14,8 @@ npm install @open-wallet-standard/core
 
 The package includes prebuilt native binaries for macOS (arm64, x64) and Linux (x64, arm64). No Rust toolchain required.
 
+For viem, `@solana/web3.js`, or Tether WDK integrations, install [`@open-wallet-standard/adapters`](https://www.npmjs.com/package/@open-wallet-standard/adapters) alongside this package — it wraps an OWS wallet as a framework-native signer without exposing private keys.
+
 ## Quick Start
 
 ```javascript
@@ -22,6 +24,8 @@ import {
   createWallet,
   listWallets,
   signMessage,
+  signHash,
+  signAuthorization,
   signTypedData,
   deleteWallet,
 } from "@open-wallet-standard/core";
@@ -87,12 +91,15 @@ const addr = deriveAddress(mnemonic, "evm");
 
 const solAddr = deriveAddress(mnemonic, "solana");
 // => "DzkqyvQrBvLqKSMhCoXoGK65e9PvyWjb6YjS4BqcxN2i"
+
+const attoAddr = deriveAddress(mnemonic, "atto");
+// => "atto://..."
 ```
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mnemonic` | `string` | &mdash; | BIP-39 mnemonic phrase |
-| `chain` | `string` | &mdash; | `"evm"`, `"solana"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` |
+| `chain` | `string` | &mdash; | `"evm"`, `"solana"`, `"xrpl"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"ton"`, `"spark"`, `"filecoin"`, `"nano"`, `"near"`, `"atto"` |
 | `index` | `number` | `0` | Account index in derivation path |
 
 **Returns:** `string`
@@ -114,7 +121,10 @@ console.log(wallet.accounts);
 //   { chainId: "tron:mainnet", address: "TKLm...", derivationPath: "m/44'/195'/0'/0/0" },
 //   { chainId: "ton:mainnet", address: "UQ...", derivationPath: "m/44'/607'/0'" },
 //   { chainId: "sui:mainnet", address: "0x...", derivationPath: "m/44'/784'/0'/0'/0'" },
+//   { chainId: "xrpl:mainnet", address: "r...", derivationPath: "m/44'/144'/0'/0/0" },
 //   { chainId: "fil:mainnet", address: "f1...", derivationPath: "m/44'/461'/0'/0/0" },
+//   { chainId: "near:mainnet", address: "...", derivationPath: "m/44'/397'/0'" },
+//   { chainId: "atto:live", address: "atto://...", derivationPath: "m/44'/1869902945'/0'" },
 // ]
 ```
 
@@ -188,7 +198,7 @@ const keys = JSON.parse(keysJson);
 
 #### `importWalletMnemonic(name, mnemonic, passphrase?, index?, vaultPath?)`
 
-Import a wallet from a BIP-39 mnemonic. Derives all 8 chain accounts via HD paths.
+Import a wallet from a BIP-39 mnemonic. Derives all supported chain accounts, including Atto (`atto:live`), via HD paths.
 
 ```javascript
 const wallet = importWalletMnemonic("imported", "goose puzzle decorate ...");
@@ -198,7 +208,7 @@ const wallet = importWalletMnemonic("imported", "goose puzzle decorate ...");
 
 #### `importWalletPrivateKey(name, privateKeyHex, passphrase?, vaultPath?, chain?, secp256k1Key?, ed25519Key?)`
 
-Import a wallet from a hex-encoded private key. All 8 chains are supported: the provided key is used for its curve's chains, and a random key is generated for the other curve.
+Import a wallet from a hex-encoded private key. All supported chains are represented: the provided key is used for its curve's chains, and a random key is generated for the other curve.
 
 The optional `chain` parameter specifies which chain the key originates from to determine the curve. Defaults to `"evm"` (secp256k1).
 
@@ -207,13 +217,13 @@ Alternatively, provide explicit keys for each curve via `secp256k1Key` and `ed25
 ```javascript
 // Import an EVM private key — generates a random Ed25519 key for Solana/Sui/TON
 const wallet = importWalletPrivateKey("from-evm", "4c0883a691...");
-console.log(wallet.accounts.length); // => 8
+console.log(wallet.accounts.length); // => 13
 
 // Import a Solana private key — generates a random secp256k1 key for EVM/BTC/etc.
 const wallet2 = importWalletPrivateKey(
   "from-solana", "9d61b19d...", undefined, undefined, "solana"
 );
-console.log(wallet2.accounts.length); // => 8
+console.log(wallet2.accounts.length); // => 13
 
 // Import explicit keys for both curves
 const wallet3 = importWalletPrivateKey(
@@ -221,7 +231,7 @@ const wallet3 = importWalletPrivateKey(
   "4c0883a691...",  // secp256k1 key
   "9d61b19d..."     // ed25519 key
 );
-console.log(wallet3.accounts.length); // => 8
+console.log(wallet3.accounts.length); // => 13
 ```
 
 | Param | Type | Default | Description |
@@ -230,11 +240,15 @@ console.log(wallet3.accounts.length); // => 8
 | `privateKeyHex` | `string` | &mdash; | Hex-encoded private key (with or without `0x` prefix). Ignored when both curve keys are provided. |
 | `passphrase` | `string` | `undefined` | Encryption passphrase |
 | `vaultPath` | `string` | `~/.ows` | Custom vault directory root |
-| `chain` | `string` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"` (Ed25519) |
+| `chain` | `string` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"`, `"nano"`, `"near"`, `"atto"` (Ed25519) |
 | `secp256k1Key` | `string` | `undefined` | Explicit secp256k1 private key (hex). Overrides random generation for secp256k1 chains. |
 | `ed25519Key` | `string` | `undefined` | Explicit Ed25519 private key (hex). Overrides random generation for Ed25519 chains. |
 
 **Returns:** `WalletInfo`
+
+### Atto notes
+
+Atto is a standalone L1 digital cash network, not a Nano-compatible chain. Native amounts have 9 decimals and should be handled as integer raw units (`1 ATTO = 1,000,000,000` raw units). Feeless send/receive flows still require an Atto node URL for account state, receivables, and publishing plus a work-server URL for PoW. Current SDK signing support derives Atto accounts and can sign raw Atto block hashes; constructing send/open/receive blocks and broadcasting them remains an application/integration responsibility until higher-level Atto send helpers are added.
 
 ### Signing
 
@@ -260,11 +274,44 @@ console.log(result.recoveryId); // 0 or 1
 
 **Returns:** `SignResult`
 
+#### `signHash(wallet, chain, hashHex, passphrase?, index?, vaultPath?)`
+
+Sign a raw 32-byte hash without adding a message prefix.
+
+This operation is only supported on secp256k1-backed chains. For EVM, the returned `recoveryId` is the raw `yParity` value (`0` or `1`).
+
+```javascript
+const result = signHash(
+  "agent-treasury",
+  "base",
+  "11".repeat(32),
+);
+console.log(result.signature);
+console.log(result.recoveryId); // 0 or 1
+```
+
+#### `signAuthorization(wallet, chain, address, nonce, passphrase?, index?, vaultPath?)`
+
+Sign an EIP-7702 authorization tuple. This is equivalent to:
+
+`signHash(wallet, chain, keccak256(0x05 || rlp([eip155_chain_id(chain), address, nonce])))`
+
+`chain` must resolve to an EVM chain. `nonce` accepts decimal or `0x`-prefixed hex. If you need a nonstandard authorization tuple, such as chain ID `0`, precompute the digest and call `signHash`.
+
+```javascript
+const result = signAuthorization(
+  "agent-treasury",
+  "base",
+  "0x1111111111111111111111111111111111111111",
+  "7",
+);
+console.log(result.signature);
+console.log(result.recoveryId); // 0 or 1
+```
+
 #### `signTypedData(wallet, chain, typedDataJson, passphrase?, index?, vaultPath?)`
 
 Sign EIP-712 typed structured data (EVM only).
-
-Current implementations support typed-data signing for owner-mode credentials. API-token typed-data signing is not yet supported.
 
 ```javascript
 const typedData = JSON.stringify({

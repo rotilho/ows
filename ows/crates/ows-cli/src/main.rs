@@ -97,7 +97,7 @@ enum WalletCommands {
         /// Import a raw private key (from OWS_PRIVATE_KEY env or stdin)
         #[arg(long)]
         private_key: bool,
-        /// Source chain for private key import (determines curve: evm/bitcoin/cosmos/tron = secp256k1, solana/ton = ed25519)
+        /// Source chain for private key import (determines curve: evm/bitcoin/cosmos/tron/filecoin = secp256k1, solana/ton/nano/near/atto = ed25519)
         #[arg(long)]
         chain: Option<String>,
         /// Account index for HD derivation (mnemonic only)
@@ -138,7 +138,7 @@ enum WalletCommands {
 enum SignCommands {
     /// Sign a message with chain-specific formatting (EIP-191, Bitcoin message signing, etc.)
     Message {
-        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -162,7 +162,7 @@ enum SignCommands {
     },
     /// Sign a transaction (accepts hex-encoded unsigned transaction bytes)
     Tx {
-        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -180,7 +180,7 @@ enum SignCommands {
     },
     /// Sign and broadcast a transaction
     SendTx {
-        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -209,9 +209,9 @@ enum MnemonicCommands {
         #[arg(long, default_value = "12")]
         words: u32,
     },
-    /// Derive an address from a mnemonic (reads from OWS_MNEMONIC env or stdin)
+    /// Derive an address from a mnemonic (for example --chain atto; reads from OWS_MNEMONIC env or stdin)
     Derive {
-        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453). If omitted, derives all chains.
+        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453). If omitted, derives all chains.
         #[arg(long)]
         chain: Option<String>,
         /// Account index
