@@ -22,7 +22,7 @@ cargo build --workspace --release
 
 ### `ows wallet create`
 
-Create a new wallet. Generates a BIP-39 mnemonic and derives addresses for all supported chains.
+Create a new wallet. Generates a BIP-39 mnemonic and derives addresses for all supported chains, including Atto (`atto:live`) as a standalone L1 account.
 
 ```bash
 ows wallet create --name "my-wallet"
@@ -44,6 +44,18 @@ Created wallet 3198bc9c-...
   bip122:000000000019d6689c085ae165831e93   bc1q...    m/84'/0'/0'/0/0
   cosmos:cosmoshub-4                     cosmos1... m/44'/118'/0'/0/0
   tron:mainnet                           TKLm...    m/44'/195'/0'/0/0
+  xrpl:mainnet                           rHsM...    m/44'/144'/0'/0/0
+  atto:live                              atto://... m/44'/1869902945'/0'
+```
+
+Atto addresses use the native `atto://` URI format. They are not Nano addresses and should not be handled as Nano-compatible accounts. Atto has 9 decimals (`1 ATTO = 1,000,000,000` raw units), and transfers are feeless; applications still need an Atto node URL for account/receivable lookup and publishing, plus an Atto work-server URL for PoW generation. OWS config keys reserve `atto:<network>` for node URLs and `atto-work:<network>` for work-server URLs.
+```json
+{
+  "rpc": {
+    "atto:live": "https://your-atto-node.example",
+    "atto-work:live": "https://your-atto-work-server.example"
+  }
+}
 ```
 
 ### `ows wallet import`
@@ -76,7 +88,7 @@ OWS_ED25519_KEY="9d61b19d..." \
 | `OWS_SECP256K1_KEY` | Explicit secp256k1 private key via environment variable |
 | `OWS_ED25519_KEY` | Explicit Ed25519 private key via environment variable |
 
-Private key imports generate all 8 chain accounts: the provided key is used for its curve's chains, and a random key is generated for the other curve. Use `OWS_SECP256K1_KEY` and `OWS_ED25519_KEY` together to supply both keys explicitly.
+Private key imports generate accounts for all supported chain families: the provided key is used for its curve's chains, and a random key is generated for the other curve. Use `OWS_SECP256K1_KEY` and `OWS_ED25519_KEY` together to supply both keys explicitly.
 
 ### `ows wallet export`
 
@@ -196,7 +208,7 @@ Lists all keys with ID, name, wallets, policies, and creation time. Tokens are n
 ows key revoke --id <key-id> --confirm
 ```
 
-Deletes the key file. The encrypted mnemonic copy is gone — the token becomes useless.
+Deletes the key file. The encrypted secret copy is gone — the token becomes useless.
 
 ## End-to-End Example: Agent Access
 
@@ -250,13 +262,26 @@ ows key revoke --id <key-id> --confirm
 Sign a message with chain-specific formatting (e.g., EIP-191 for EVM, `\x19TRON Signed Message` for Tron).
 
 ```bash
-ows sign message --wallet "my-wallet" --chain evm --message "hello world"
+# EVM (Ethereum mainnet)
+ows sign message --wallet "my-wallet" --chain ethereum --message "hello world"
+
+# Solana
+ows sign message --wallet "my-wallet" --chain solana --message "hello world"
+
+# Bitcoin
+ows sign message --wallet "my-wallet" --chain bitcoin --message "hello world"
+
+# Base via bare chain ID
+ows sign message --wallet "my-wallet" --chain 8453 --message "hello world"
+
+# Atto signs raw Ed25519 bytes for messages; this is not Nano-compatible formatting.
+ows sign message --wallet "my-wallet" --chain atto --message "hello atto"
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--wallet <NAME>` | Wallet name or ID |
-| `--chain <CHAIN>` | Chain family or supported alias / CAIP-2 ID |
+| `--chain <CHAIN>` | Chain name (`ethereum`, `base`, `arbitrum`, `atto`, …), CAIP-2 ID (`eip155:8453`, `atto:live`), or bare EVM chain ID (`8453`) |
 | `--message <MSG>` | Message to sign |
 | `--encoding <ENC>` | Message encoding: `utf8` (default) or `hex` |
 | `--typed-data <JSON>` | EIP-712 typed data JSON (EVM only) |
@@ -267,13 +292,19 @@ ows sign message --wallet "my-wallet" --chain evm --message "hello world"
 Sign a raw transaction (hex-encoded bytes).
 
 ```bash
-ows sign tx --wallet "my-wallet" --chain evm --tx "02f8..."
+ows sign tx --wallet "my-wallet" --chain ethereum --tx "02f8..."
+ows sign tx --wallet "my-wallet" --chain solana --tx "deadbeef..."
+
+# Atto: sign a 32-byte canonical Atto block hash. The CLI does not construct
+# send/receive/open blocks or publish them yet; callers must use an Atto node
+# plus work server for receivables, receive blocks, work, and publishing.
+ows sign tx --wallet "my-wallet" --chain atto --tx "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--wallet <NAME>` | Wallet name or ID |
-| `--chain <CHAIN>` | Chain family |
+| `--chain <CHAIN>` | Chain name (`ethereum`, `base`, `arbitrum`, `atto`, …), CAIP-2 ID (`eip155:8453`, `atto:live`), or bare EVM chain ID (`8453`) |
 | `--tx <HEX>` | Hex-encoded transaction bytes |
 | `--json` | Output structured JSON |
 
@@ -294,7 +325,8 @@ ows mnemonic generate --words 24
 Derive an address from a mnemonic for a given chain. Reads the mnemonic from the `OWS_MNEMONIC` environment variable or stdin.
 
 ```bash
-echo "word1 word2 ..." | ows mnemonic derive --chain evm
+echo "word1 word2 ..." | ows mnemonic derive --chain ethereum
+echo "word1 word2 ..." | ows mnemonic derive --chain atto
 ```
 
 ## Payment Commands

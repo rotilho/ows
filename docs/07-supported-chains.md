@@ -21,7 +21,7 @@ type AssetId = `${ChainId}:${string}`;
 // e.g. "eip155:8453:native" (ETH on Base)
 ```
 
-The `native` token refers to the chain's native currency (ETH, SOL, SUI, XRP, BTC, ATOM, TRX, TON, etc.).
+The `native` token refers to the chain's native currency (ETH, SOL, SUI, XRP, BTC, ATOM, TRX, TON, ATTO, etc.).
 
 ## Chain Families
 
@@ -40,7 +40,7 @@ OWS groups chains into families that share a cryptographic curve and address der
 | Spark | secp256k1 | 8797555 | `m/84'/0'/0'/0/{index}` | `spark:` + compressed pubkey hex | `spark` |
 | Filecoin | secp256k1 | 461 | `m/44'/461'/0'/0/{index}` | `f1` + base32(blake2b-160) | `fil` |
 | NEAR | ed25519 | 397 | `m/44'/397'/{index}'` | 64-char lowercase hex of pubkey (implicit account) | `near` |
-| Atto | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase base32 URI | `atto` (provisional) |
+| Atto (standalone L1 digital cash) | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase base32 URI; not Nano-compatible | `atto` (provisional) |
 
 ## Known Networks
 
@@ -81,6 +81,8 @@ Each network has a canonical chain identifier. Endpoint discovery and transport 
 | Atto (beta) | `atto:beta` |
 | Atto (dev) | `atto:dev` |
 | Atto (local) | `atto:local` |
+
+Atto is a standalone layer-1 digital cash network. It is not a Nano fork and OWS MUST NOT reuse Nano identifiers, derivation rules, block serialization, or RPC transport for Atto. Atto amounts use 9 decimals (`1 ATTO = 1,000,000,000` raw units); transfers are feeless, so there is no gas/fee field in the Atto signing model. Send/receive flows still require infrastructure: an Atto node URL for account state, receivables, and transaction publishing, plus a work-server URL for PoW generation. OWS reserves `atto:<network>` config entries for node URLs and `atto-work:<network>` entries for work-server URLs; examples should use operator-supplied URLs rather than private endpoints. Receiving funds requires discovering receivables and publishing an `OPEN` or `RECEIVE` block, not just signing a send block.
 
 Implementations MAY ship convenience endpoint defaults, but those defaults are deployment choices rather than OWS interoperability requirements.
 
