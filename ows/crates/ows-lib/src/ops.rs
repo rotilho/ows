@@ -754,6 +754,7 @@ pub fn sign_encode_and_broadcast(
 }
 
 /// Send raw Atto units from a wallet account to an `atto://` address.
+#[allow(clippy::too_many_arguments)]
 pub fn atto_send_raw(
     wallet: &str,
     chain: &str,
@@ -925,6 +926,7 @@ pub fn atto_receive_one(
 }
 
 /// Change the representative for an opened Atto account while preserving balance.
+#[allow(clippy::too_many_arguments)]
 pub fn atto_change_representative(
     wallet: &str,
     chain: &str,

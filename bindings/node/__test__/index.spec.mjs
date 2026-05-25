@@ -246,11 +246,16 @@ describe('@open-wallet-standard/core', () => {
     // signs the digest. Any non-empty bytes verify the signing pipeline.
     const nearTxHex = '42'.repeat(80);
 
+    // Atto requires canonical unsigned block bytes (or a 32-byte block hash);
+    // use the SEND fixture payload instead of the generic dummy bytes.
+    const attoTxHex =
+      '0203000000a5e7e4b3b93150314e1177d5b9de0057626b16a4b3c3f1db37df67628a5ef45702000000000000000100000000000000fb1d08e38c0100006cc2d3a7513723b1ba59de784ba546baf6447464d0ba3d80004752d6f9f4ba2300552254e101b51b22080d084c12c94bf7dfc5be0d973025d62c0bc1ff4d9b145f0100000000000000';
+
     const txHexByChain = {
       solana: solTxHex,
       nano: nanoTxHex,
       near: nearTxHex,
-      atto: txHex,
+      atto: attoTxHex,
     };
 
     for (const chain of ['evm', 'solana', 'sui', 'bitcoin', 'cosmos', 'tron', 'ton', 'filecoin', 'xrpl', 'nano', 'near', 'atto']) {
