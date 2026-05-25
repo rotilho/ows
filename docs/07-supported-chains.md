@@ -40,6 +40,7 @@ OWS groups chains into families that share a cryptographic curve and address der
 | Spark | secp256k1 | 8797555 | `m/84'/0'/0'/0/{index}` | `spark:` + compressed pubkey hex | `spark` |
 | Filecoin | secp256k1 | 461 | `m/44'/461'/0'/0/{index}` | `f1` + base32(blake2b-160) | `fil` |
 | NEAR | ed25519 | 397 | `m/44'/397'/{index}'` | 64-char lowercase hex of pubkey (implicit account) | `near` |
+| Atto | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase base32 URI | `atto` (provisional) |
 
 ## Known Networks
 
@@ -76,6 +77,10 @@ Each network has a canonical chain identifier. Endpoint discovery and transport 
 | Filecoin | `fil:mainnet` |
 | NEAR | `near:mainnet` |
 | NEAR (testnet) | `near:testnet` |
+| Atto | `atto:live` |
+| Atto (beta) | `atto:beta` |
+| Atto (dev) | `atto:dev` |
+| Atto (local) | `atto:local` |
 
 Implementations MAY ship convenience endpoint defaults, but those defaults are deployment choices rather than OWS interoperability requirements.
 
@@ -109,6 +114,11 @@ spark     → spark:mainnet
 filecoin  → fil:mainnet
 near          → near:mainnet
 near-testnet  → near:testnet
+atto          → atto:live
+atto-live     → atto:live
+atto-beta     → atto:beta
+atto-dev      → atto:dev
+atto-local    → atto:local
 ```
 
 Aliases MUST be resolved to full CAIP-2 identifiers before any processing. They MUST NOT appear in wallet files, policy files, or audit logs.
@@ -133,7 +143,8 @@ Master Seed (512 bits via PBKDF2)
     ├── m/44'/144'/0'/0/0   → XRPL Account 0
     ├── m/84'/0'/0'/0/0     → Spark Account 0
     ├── m/44'/461'/0'/0/0   → Filecoin Account 0
-    └── m/44'/397'/0'       → NEAR Account 0
+    ├── m/44'/397'/0'       → NEAR Account 0
+    └── m/44'/1869902945'/0' → Atto Account 0
 ```
 
 For mnemonic-based wallets, a single mnemonic derives accounts across all supported chains. Those wallet files store the encrypted mnemonic, and the signer derives the appropriate private key using each chain's coin type and derivation path. Wallets imported from raw private keys instead store encrypted curve-key material directly.
@@ -146,7 +157,7 @@ For mnemonic-based wallets, a single mnemonic derives accounts across all suppor
 4. Define the signing and message-signing behavior required by `02-signing-interface.md`.
 5. Document any transaction serialization rules needed to produce deterministic signatures.
 
-No changes to OWS core, the signing interface, or the policy engine are needed.
+Core registry changes are required for first-class chain metadata, parser aliases, wallet account enumeration, and policy/audit chain IDs. Address codec, transaction serialization, and broadcast support remain chain-specific implementation work.
 
 ## References
 
@@ -156,3 +167,4 @@ No changes to OWS core, the signing interface, or the policy engine are needed.
 - [BIP-39: Mnemonic Code](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)
 - [BIP-44: Multi-Account Hierarchy](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)
 - [SLIP-44: Registered Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
+- [Atto integration docs](https://atto.cash/docs/integration)

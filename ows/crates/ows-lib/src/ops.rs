@@ -820,6 +820,9 @@ fn broadcast(chain: ChainType, rpc_url: &str, signed_bytes: &[u8]) -> Result<Str
         ChainType::Xrpl => broadcast_xrpl(rpc_url, signed_bytes),
         ChainType::Nano => broadcast_nano(rpc_url, signed_bytes),
         ChainType::Near => crate::near_rpc::broadcast_tx_commit(rpc_url, signed_bytes),
+        ChainType::Atto => Err(OwsLibError::InvalidInput(
+            "broadcast not yet supported for Atto".into(),
+        )),
     }
 }
 
@@ -1238,6 +1241,14 @@ mod tests {
         let w1 = create_wallet("w1", None, None, Some(v1.path())).unwrap();
         assert!(!w1.accounts.is_empty());
 
+        let atto_account = w1
+            .accounts
+            .iter()
+            .find(|acct| acct.chain_id == "atto:live")
+            .expect("Atto account should be derived for new wallets");
+        assert!(atto_account.address.starts_with("atto://"));
+        assert_eq!(atto_account.derivation_path, "m/44'/1869902945'/0'");
+
         // Export mnemonic
         let phrase = export_wallet("w1", None, Some(v1.path())).unwrap();
         assert_eq!(phrase.split_whitespace().count(), 12);
@@ -1267,7 +1278,7 @@ mod tests {
         // support generic off-chain message signing without a defined convention.
         // NEAR's V1 sign_message is raw ed25519 (NEP-413 follow-up tracked).
         let chains = [
-            "evm", "solana", "bitcoin", "cosmos", "tron", "ton", "spark", "sui", "near",
+            "evm", "solana", "bitcoin", "cosmos", "tron", "ton", "spark", "sui", "near", "atto",
         ];
         for chain in &chains {
             let result = sign_message(
