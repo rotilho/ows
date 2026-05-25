@@ -1425,10 +1425,48 @@ fn broadcast(chain: ChainType, rpc_url: &str, signed_bytes: &[u8]) -> Result<Str
         ChainType::Xrpl => broadcast_xrpl(rpc_url, signed_bytes),
         ChainType::Nano => broadcast_nano(rpc_url, signed_bytes),
         ChainType::Near => crate::near_rpc::broadcast_tx_commit(rpc_url, signed_bytes),
-        ChainType::Atto => Err(OwsLibError::InvalidInput(
-            "broadcast not yet supported for Atto".into(),
-        )),
+        ChainType::Atto => broadcast_atto(rpc_url, signed_bytes),
     }
+}
+
+fn broadcast_atto(rpc_url: &str, signed_bytes: &[u8]) -> Result<String, OwsLibError> {
+    let transaction =
+        ows_signer::chains::atto::atto_signed_transaction_to_api_json_value(signed_bytes)?;
+    let tx_hash = ows_signer::chains::atto::atto_signed_transaction_hash_hex(signed_bytes)?;
+
+    let work = transaction
+        .get("work")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            OwsLibError::InvalidInput("missing Atto work in signed transaction payload".into())
+        })?;
+    if work.trim().is_empty() || work == "0000000000000000" {
+        return Err(OwsLibError::InvalidInput(
+            "missing Atto work in signed transaction payload".into(),
+        ));
+    }
+    if transaction
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|sig| sig.trim().is_empty())
+    {
+        return Err(OwsLibError::InvalidInput(
+            "missing Atto signature in signed transaction payload".into(),
+        ));
+    }
+    if transaction
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|address| address.trim().is_empty())
+    {
+        return Err(OwsLibError::InvalidInput(
+            "missing Atto address in signed transaction payload".into(),
+        ));
+    }
+
+    let response =
+        crate::atto_rpc::AttoNodeClient::new(rpc_url).publish_transaction_value(&transaction)?;
+    Ok(response.hash.unwrap_or(tx_hash))
 }
 
 fn broadcast_xrpl(rpc_url: &str, signed_bytes: &[u8]) -> Result<String, OwsLibError> {
@@ -1742,6 +1780,91 @@ mod tests {
     const TEST_ATTO_ED25519_PRIVKEY: &str =
         "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
     const TEST_HASH: &str = "9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C";
+
+    fn serve_once(
+        status: u16,
+        content_type: &str,
+        body: &str,
+    ) -> (String, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = body.to_string();
+        let content_type = content_type.to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = std::io::Read::read(&mut stream, &mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let request_text = String::from_utf8_lossy(&request).to_string();
+                    let content_length = request_text
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("Content-Length: ")
+                                .or_else(|| line.strip_prefix("content-length: "))
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let header_end = request
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map(|pos| pos + 4)
+                        .unwrap();
+                    while request.len() < header_end + content_length {
+                        let n = std::io::Read::read(&mut stream, &mut buf).unwrap();
+                        if n == 0 {
+                            break;
+                        }
+                        request.extend_from_slice(&buf[..n]);
+                    }
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            std::io::Write::write_all(&mut stream, response.as_bytes()).unwrap();
+            String::from_utf8_lossy(&request).to_string()
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    fn sample_atto_unsigned_payload_with_work() -> Vec<u8> {
+        let block = ows_signer::chains::atto::AttoBlock::Receive(
+            ows_signer::chains::atto::AttoReceiveBlock {
+                network: ows_signer::chains::atto::AttoNetwork::Local,
+                version: 0,
+                public_key: [0x11; 32],
+                height: 2,
+                balance: 42,
+                timestamp_ms: 1_700_000_000_000,
+                previous: [0x22; 32],
+                send_hash: [0x33; 32],
+            },
+        );
+        let mut payload = block.to_buffer();
+        payload.extend_from_slice(&[0x44; 8]);
+        payload
+    }
+
+    fn sample_atto_signed_payload() -> Vec<u8> {
+        let mut payload = sample_atto_unsigned_payload_with_work();
+        let work = payload.split_off(payload.len() - 8);
+        payload.extend_from_slice(&[0xaa; 64]);
+        payload.extend_from_slice(&work);
+        payload
+    }
+
+    fn sample_atto_hash() -> String {
+        ows_signer::chains::atto::atto_signed_transaction_hash_hex(&sample_atto_signed_payload())
+            .unwrap()
+    }
 
     fn save_allowed_chains_policy(vault: &Path, id: &str, chain_ids: Vec<String>) {
         let policy = ows_core::Policy {
@@ -2804,6 +2927,79 @@ mod tests {
         assert_eq!(list_wallets(Some(vault)).unwrap().len(), 2);
         assert!(sign_message("w1", "evm", "test", None, None, None, Some(vault)).is_ok());
         assert!(sign_message("w3", "evm", "test", None, None, None, Some(vault)).is_ok());
+    }
+
+    // ================================================================
+    // 11A. ATTO BROADCAST
+    // ================================================================
+
+    #[test]
+    fn atto_broadcast_posts_transaction_json_and_returns_payload_hash() {
+        let payload = sample_atto_signed_payload();
+        let (base_url, handle) = serve_once(200, "application/json", "");
+
+        let tx_hash = broadcast(ChainType::Atto, &base_url, &payload).unwrap();
+        let request = handle.join().unwrap();
+
+        assert_eq!(tx_hash, sample_atto_hash());
+        assert!(
+            request.starts_with("POST /transactions HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            request.contains("\"work\":\"4444444444444444\""),
+            "{request}"
+        );
+        assert!(request.contains("\"signature\":\""), "{request}");
+        assert!(request.contains("\"address\":\"atto://"), "{request}");
+    }
+
+    #[test]
+    fn sign_encode_and_broadcast_atto_uses_shared_library_path() {
+        let payload = sample_atto_unsigned_payload_with_work();
+        let (base_url, handle) = serve_once(200, "application/json", "");
+        let private_key = hex::decode(TEST_PRIVKEY).unwrap();
+
+        let result =
+            sign_encode_and_broadcast(&private_key, "atto:live", &payload, Some(&base_url))
+                .unwrap();
+        let request = handle.join().unwrap();
+
+        assert_eq!(result.tx_hash, sample_atto_hash());
+        assert!(
+            request.starts_with("POST /transactions HTTP/1.1"),
+            "{request}"
+        );
+        assert!(request.contains("\"signature\":\""), "{request}");
+        assert!(request.contains("\"address\":\"atto://"), "{request}");
+    }
+
+    #[test]
+    fn atto_broadcast_surfaces_node_api_errors() {
+        let payload = sample_atto_signed_payload();
+        let (base_url, handle) =
+            serve_once(422, "application/json", r#"{"message":"invalid work"}"#);
+
+        let err = broadcast(ChainType::Atto, &base_url, &payload).unwrap_err();
+        let request = handle.join().unwrap();
+
+        assert!(
+            request.starts_with("POST /transactions HTTP/1.1"),
+            "{request}"
+        );
+        assert!(err.to_string().contains("Atto HTTP 422"), "{err}");
+        assert!(err.to_string().contains("invalid work"), "{err}");
+    }
+
+    #[test]
+    fn atto_broadcast_rejects_malformed_signed_payloads() {
+        let err = broadcast(ChainType::Atto, "http://127.0.0.1:9", b"not json").unwrap_err();
+
+        assert!(
+            err.to_string().contains("invalid transaction")
+                || err.to_string().contains("unsupported Atto block type"),
+            "{err}"
+        );
     }
 
     // ================================================================

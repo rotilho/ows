@@ -456,6 +456,188 @@ fn atto_unsigned_parts(tx_bytes: &[u8]) -> Result<(&[u8], &[u8]), SignerError> {
     }
 }
 
+fn atto_network_from_code(code: u8) -> Result<AttoNetwork, SignerError> {
+    match code {
+        0 => Ok(AttoNetwork::Live),
+        1 => Ok(AttoNetwork::Beta),
+        2 => Ok(AttoNetwork::Dev),
+        3 => Ok(AttoNetwork::Local),
+        other => Err(SignerError::InvalidTransaction(format!(
+            "unsupported Atto network byte {other}"
+        ))),
+    }
+}
+
+fn read_array<const N: usize>(bytes: &[u8], offset: &mut usize) -> Result<[u8; N], SignerError> {
+    let end = *offset + N;
+    let slice = bytes.get(*offset..end).ok_or_else(|| {
+        SignerError::InvalidTransaction(format!(
+            "truncated Atto payload while reading {N} bytes at offset {}",
+            *offset
+        ))
+    })?;
+    *offset = end;
+    slice.try_into().map_err(|_| {
+        SignerError::InvalidTransaction(format!("invalid Atto payload field length {N}"))
+    })
+}
+
+fn read_u8(bytes: &[u8], offset: &mut usize) -> Result<u8, SignerError> {
+    Ok(read_array::<1>(bytes, offset)?[0])
+}
+
+fn read_u16_le(bytes: &[u8], offset: &mut usize) -> Result<u16, SignerError> {
+    Ok(u16::from_le_bytes(read_array::<2>(bytes, offset)?))
+}
+
+fn read_u64_le(bytes: &[u8], offset: &mut usize) -> Result<u64, SignerError> {
+    Ok(u64::from_le_bytes(read_array::<8>(bytes, offset)?))
+}
+
+fn read_i64_le(bytes: &[u8], offset: &mut usize) -> Result<i64, SignerError> {
+    Ok(i64::from_le_bytes(read_array::<8>(bytes, offset)?))
+}
+
+fn read_algorithm_v1(bytes: &[u8], offset: &mut usize, label: &str) -> Result<(), SignerError> {
+    let algorithm = read_u8(bytes, offset)?;
+    if algorithm != AttoBlock::ALGORITHM_V1 {
+        return Err(SignerError::InvalidTransaction(format!(
+            "unsupported Atto {label} algorithm byte {algorithm}"
+        )));
+    }
+    Ok(())
+}
+
+fn atto_block_from_bytes(block_bytes: &[u8]) -> Result<AttoBlock, SignerError> {
+    let expected = atto_block_size_from_prefix(block_bytes)?;
+    if block_bytes.len() != expected {
+        return Err(SignerError::InvalidTransaction(format!(
+            "invalid Atto block length: expected {expected} bytes, got {}",
+            block_bytes.len()
+        )));
+    }
+
+    let mut offset = 0;
+    let block_type = read_u8(block_bytes, &mut offset)?;
+    let network = atto_network_from_code(read_u8(block_bytes, &mut offset)?)?;
+    let version = read_u16_le(block_bytes, &mut offset)?;
+    read_algorithm_v1(block_bytes, &mut offset, "block")?;
+    let public_key = read_array::<32>(block_bytes, &mut offset)?;
+
+    match block_type {
+        0 => {
+            let balance = read_u64_le(block_bytes, &mut offset)?;
+            let timestamp_ms = read_i64_le(block_bytes, &mut offset)?;
+            read_algorithm_v1(block_bytes, &mut offset, "send hash")?;
+            let send_hash = read_array::<32>(block_bytes, &mut offset)?;
+            read_algorithm_v1(block_bytes, &mut offset, "representative")?;
+            let representative_public_key = read_array::<32>(block_bytes, &mut offset)?;
+            Ok(AttoBlock::Open(AttoOpenBlock {
+                network,
+                version,
+                public_key,
+                balance,
+                timestamp_ms,
+                send_hash,
+                representative_public_key,
+            }))
+        }
+        1 => {
+            let height = read_u64_le(block_bytes, &mut offset)?;
+            let balance = read_u64_le(block_bytes, &mut offset)?;
+            let timestamp_ms = read_i64_le(block_bytes, &mut offset)?;
+            let previous = read_array::<32>(block_bytes, &mut offset)?;
+            read_algorithm_v1(block_bytes, &mut offset, "send hash")?;
+            let send_hash = read_array::<32>(block_bytes, &mut offset)?;
+            Ok(AttoBlock::Receive(AttoReceiveBlock {
+                network,
+                version,
+                public_key,
+                height,
+                balance,
+                timestamp_ms,
+                previous,
+                send_hash,
+            }))
+        }
+        2 => {
+            let height = read_u64_le(block_bytes, &mut offset)?;
+            let balance = read_u64_le(block_bytes, &mut offset)?;
+            let timestamp_ms = read_i64_le(block_bytes, &mut offset)?;
+            let previous = read_array::<32>(block_bytes, &mut offset)?;
+            read_algorithm_v1(block_bytes, &mut offset, "receiver")?;
+            let receiver_public_key = read_array::<32>(block_bytes, &mut offset)?;
+            let amount = read_u64_le(block_bytes, &mut offset)?;
+            Ok(AttoBlock::Send(AttoSendBlock {
+                network,
+                version,
+                public_key,
+                height,
+                balance,
+                timestamp_ms,
+                previous,
+                receiver_public_key,
+                amount,
+            }))
+        }
+        3 => {
+            let height = read_u64_le(block_bytes, &mut offset)?;
+            let balance = read_u64_le(block_bytes, &mut offset)?;
+            let timestamp_ms = read_i64_le(block_bytes, &mut offset)?;
+            let previous = read_array::<32>(block_bytes, &mut offset)?;
+            read_algorithm_v1(block_bytes, &mut offset, "representative")?;
+            let representative_public_key = read_array::<32>(block_bytes, &mut offset)?;
+            Ok(AttoBlock::Change(AttoChangeBlock {
+                network,
+                version,
+                public_key,
+                height,
+                balance,
+                timestamp_ms,
+                previous,
+                representative_public_key,
+            }))
+        }
+        other => Err(SignerError::InvalidTransaction(format!(
+            "unsupported Atto block type byte {other}"
+        ))),
+    }
+}
+
+pub fn atto_signed_transaction_to_api_json_value(
+    signed_bytes: &[u8],
+) -> Result<Value, SignerError> {
+    let block_size = atto_block_size_from_prefix(signed_bytes)?;
+    let expected = block_size + 64 + 8;
+    if signed_bytes.len() != expected {
+        return Err(SignerError::InvalidTransaction(format!(
+            "Atto signed transaction must be {expected} bytes ({block_size} block + 64 signature + 8 work), got {}",
+            signed_bytes.len()
+        )));
+    }
+    let block = atto_block_from_bytes(&signed_bytes[..block_size])?;
+    let signature = signed_bytes[block_size..block_size + 64]
+        .try_into()
+        .expect("signature slice length is fixed");
+    let work = signed_bytes[block_size + 64..expected]
+        .try_into()
+        .expect("work slice length is fixed");
+    Ok(AttoSignedTransaction::new(block, signature, work).to_api_json_value())
+}
+
+pub fn atto_signed_transaction_hash_hex(signed_bytes: &[u8]) -> Result<String, SignerError> {
+    let block_size = atto_block_size_from_prefix(signed_bytes)?;
+    if signed_bytes.len() < block_size {
+        return Err(SignerError::InvalidTransaction(format!(
+            "invalid Atto signed transaction length: expected at least {block_size} block bytes, got {}",
+            signed_bytes.len()
+        )));
+    }
+    Ok(hex::encode_upper(atto_block_hash(
+        &signed_bytes[..block_size],
+    )))
+}
+
 /// Atto chain signer metadata and local Ed25519 primitives.
 ///
 /// Canonical block bytes follow Atto Commons `AttoBlock.toBuffer()`. The block
@@ -760,6 +942,33 @@ mod tests {
         assert_eq!(json["type"], "RECEIVE");
         assert_eq!(json["signature"], "11".repeat(64));
         assert_eq!(json["work"], "22".repeat(8));
+    }
+
+    #[test]
+    fn signed_transaction_bytes_convert_to_api_json_and_hash() {
+        let block = fixture_receive_block();
+        let signed = AttoSignedTransaction::new(block.clone(), [0x11; 64], [0x22; 8]);
+        let bytes = signed.to_buffer();
+
+        let json = atto_signed_transaction_to_api_json_value(&bytes).unwrap();
+        let hash = atto_signed_transaction_hash_hex(&bytes).unwrap();
+
+        assert_eq!(json["type"], "RECEIVE");
+        assert_eq!(json["signature"], "11".repeat(64));
+        assert_eq!(json["work"], "22".repeat(8));
+        assert!(json["address"].as_str().unwrap().starts_with("atto://"));
+        assert_eq!(hash, hex::encode_upper(block.hash()));
+    }
+
+    #[test]
+    fn signed_transaction_api_json_rejects_missing_work_bytes() {
+        let block = fixture_receive_block();
+        let mut bytes = block.to_buffer();
+        bytes.extend_from_slice(&[0x11; 64]);
+
+        let err = atto_signed_transaction_to_api_json_value(&bytes).unwrap_err();
+
+        assert!(err.to_string().contains("signature + 8 work"), "{err}");
     }
 
     fn hex32(s: &str) -> [u8; 32] {

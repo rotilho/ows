@@ -238,10 +238,28 @@ impl AttoNodeClient {
         transaction: &AttoTransaction,
     ) -> Result<AttoPublishResponse, OwsLibError> {
         let body = serde_json::to_value(transaction)?;
-        let _ = self.request_text("POST", "transactions", Some(&body), "application/json")?;
+        self.publish_transaction_value(&body)
+    }
+
+    /// `POST /transactions` with a caller-provided Atto node transaction JSON
+    /// shape. This is used by the local signer path, which converts canonical
+    /// signed Atto bytes into the flat JSON body expected by the node OpenAPI.
+    pub fn publish_transaction_value(
+        &self,
+        transaction: &Value,
+    ) -> Result<AttoPublishResponse, OwsLibError> {
+        let _ = self.request_text(
+            "POST",
+            "transactions",
+            Some(transaction),
+            "application/json",
+        )?;
         Ok(AttoPublishResponse {
             status: AttoPublishStatus::Published,
-            hash: None,
+            hash: transaction
+                .get("hash")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             transaction: None,
         })
     }
