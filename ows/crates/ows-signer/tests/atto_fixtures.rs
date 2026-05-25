@@ -1,5 +1,7 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use ows_signer::chains::atto::{atto_address, atto_pubkey_from_address, AttoSigner};
+use ows_signer::chains::atto::{
+    atto_address, atto_block_hash, atto_pubkey_from_address, AttoSigner,
+};
 use ows_signer::{ChainSigner, Curve, HdDeriver, Mnemonic};
 use serde::Deserialize;
 
@@ -42,6 +44,7 @@ struct InvalidAddressCase {
 struct BlockHashSignature {
     #[serde(rename = "type")]
     block_type: String,
+    block_bytes_hex: String,
     hash_hex: String,
     signature_hex: String,
 }
@@ -134,21 +137,27 @@ fn address_codec_accepts_fixture_and_rejects_invalid_checksum_cases() {
 }
 
 #[test]
-fn block_hash_signatures_cover_send_receive_open_and_change_hash_inputs() {
+fn block_hash_signatures_cover_send_receive_open_and_change_serialization_inputs() {
     let fixtures = fixtures();
     let account = fixtures
         .derived_accounts
         .first()
         .expect("fixture has index 0 account");
     let private_key = hex_to_vec(&account.private_key_hex);
+    let public_key: [u8; 32] = hex_to_vec(&account.public_key_hex).try_into().unwrap();
+    let verifying_key = VerifyingKey::from_bytes(&public_key).unwrap();
     let signer = AttoSigner;
     let mut seen = Vec::new();
 
     for fixture in fixtures.block_hash_signatures {
-        let hash = hex_to_vec(&fixture.hash_hex);
-        assert_eq!(hash.len(), 32, "Atto signs canonical 32-byte block hashes");
-        let output = signer.sign_transaction(&private_key, &hash).unwrap();
+        let block_bytes = hex_to_vec(&fixture.block_bytes_hex);
+        let hash = atto_block_hash(&block_bytes);
+        assert_eq!(hex_lower(&hash), fixture.hash_hex);
+
+        let output = signer.sign_transaction(&private_key, &block_bytes).unwrap();
         assert_eq!(hex_lower(&output.signature), fixture.signature_hex);
+        let signature = Signature::from_bytes(&output.signature.try_into().unwrap());
+        verifying_key.verify(&hash, &signature).unwrap();
         seen.push(fixture.block_type);
     }
 
@@ -156,11 +165,13 @@ fn block_hash_signatures_cover_send_receive_open_and_change_hash_inputs() {
 }
 
 #[test]
-fn sign_transaction_rejects_non_hash_serialization_inputs() {
+fn sign_transaction_rejects_non_canonical_block_payloads() {
     let fixtures = fixtures();
     let private_key = hex_to_vec(&fixtures.derived_accounts[0].private_key_hex);
+    let mut truncated_send = vec![2u8; 32];
+    truncated_send[0] = 2;
     let err = AttoSigner
-        .sign_transaction(&private_key, b"not a canonical 32-byte hash")
+        .sign_transaction(&private_key, &truncated_send)
         .unwrap_err();
-    assert!(err.to_string().contains("32-byte canonical block hash"));
+    assert!(err.to_string().contains("invalid Atto payload length"));
 }
