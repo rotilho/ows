@@ -1,0 +1,43 @@
+{
+  "provenance": "Generated from OWS Atto implementation and docs/09-atto-integration-contract.md; replace/augment with official Atto Commons vectors when published.",
+  "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+  "passphrase": "",
+  "coin_type": 1869902945,
+  "curve": "Ed25519",
+  "message_hex": "6174746f2066697874757265206d657373616765",
+  "derived_accounts": [
+    {
+      "index": 0,
+      "path": "m/44'/1869902945'/0'",
+      "private_key_hex": "bcc806481fd45b8cf5c69c605b9424b75b76ae5c36823a83001e436d3653c97f",
+      "public_key_hex": "d868642176e4b7ce32c41295e9b89a1b100821e2632aa827a95913055848f727",
+      "address": "atto://admgqzbbo3slptrsyqjjl2nytinracbb4jrsvkbhvfmrgbkyjd3sor3ozzrtg",
+      "message_signature_hex": "b6e2bc6d980b9b2bbe77c3c33ca1a22fd41b2f6c9fcaf654cd10394d77cf2935160371d86fc832b68c1ae8b0fb1ca689cced77cbd00e87fedbeca15519a2be09"
+    },
+    {
+      "index": 1,
+      "path": "m/44'/1869902945'/1'",
+      "private_key_hex": "52befe9345c1bce443de26a689935400340d17c3eee08942005c17b6bc180782",
+      "public_key_hex": "2604ea31b92487ad27a0dcb3996aee8000eebc1f4f531ca818f167754a1a1b8d",
+      "address": "atto://aataj2rrxesipljhudolhglk52aab3v4d5hvghfiddywo5kkdiny2jzvwfxac",
+      "message_signature_hex": "4f05c9b4d3050dac92673d324a0b6375c95d73079810bd40da0a576030edf1e55edd015db957dd1aabc78c227da26cf923d0b691c0e31c39d6d7626c78f31909"
+    }
+  ],
+  "address_codec": {
+    "public_key_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+    "address": "atto://abbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6",
+    "invalid_cases": [
+      { "address": "nano://abbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6", "error_contains": "prefix" },
+      { "address": "atto://ABBEeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6", "error_contains": "alphabet" },
+      { "address": "atto://abbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6a", "error_contains": "61" },
+      { "address": "atto://a0beeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6", "error_contains": "alphabet" },
+      { "address": "atto://abbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqtera", "error_contains": "checksum" }
+    ]
+  },
+  "block_hash_signatures": [
+    { "type": "SEND", "hash_hex": "1111111111111111111111111111111111111111111111111111111111111111", "signature_hex": "b136a528f349d091edf26857380e054550f16e47f8ec51e5308802cc29506a6ae6ab2938c2f0d01e36a19b01bb26fb5a3399afdf45f1e5f5e53188f1aa3bf80d" },
+    { "type": "RECEIVE", "hash_hex": "2222222222222222222222222222222222222222222222222222222222222222", "signature_hex": "24a61cbdbfc985195f642902ea08bd38481773f6d3e8df1d43274e74f13c3ae7ffc049bcf4c46528ca226044eb02235f7c52f4634c5c6ae9c1c456ad9e3a8900" },
+    { "type": "OPEN", "hash_hex": "3333333333333333333333333333333333333333333333333333333333333333", "signature_hex": "f95044eafc9ab2a91cdb6cf957f1b0492e5d9037b1290792d1f62caf0a1f16fdc51c5de1991877ae6a252d8c5eb08c0462e6aefc678aa15008ad565f2ee97906" },
+    { "type": "CHANGE", "hash_hex": "4444444444444444444444444444444444444444444444444444444444444444", "signature_hex": "71460909bcb344a2360abafcdec80df9b0eb83df1ce42b2ec3bb849d8e164ad0c6864a38fdec225892d6b1d910925f7d420eda9e73aeafc06f7ea1edd32bb802" }
+  ]
+}
