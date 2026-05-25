@@ -432,7 +432,7 @@ fn atto_block_size_from_prefix(tx_bytes: &[u8]) -> Result<usize, SignerError> {
         2 => Ok(AttoBlock::SEND_SIZE),
         3 => Ok(AttoBlock::CHANGE_SIZE),
         other => Err(SignerError::InvalidTransaction(format!(
-            "unsupported Atto block type byte {other}"
+            "unsupported Atto block type byte {other}; expected canonical block bytes or 32-byte canonical block hash"
         ))),
     }
 }
@@ -508,6 +508,9 @@ impl ChainSigner for AttoSigner {
         private_key: &[u8],
         tx_bytes: &[u8],
     ) -> Result<SignOutput, SignerError> {
+        if tx_bytes.len() == 32 {
+            return self.sign(private_key, tx_bytes);
+        }
         let (block_bytes, _) = atto_unsigned_parts(tx_bytes)?;
         let hash = atto_block_hash(block_bytes);
         self.sign(private_key, &hash)
