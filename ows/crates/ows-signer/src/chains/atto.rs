@@ -35,6 +35,47 @@ fn encode_base32_lower_no_pad(data: &[u8]) -> String {
     out
 }
 
+fn decode_base32_lower_no_pad(body: &str) -> Result<Vec<u8>, SignerError> {
+    let mut out = Vec::with_capacity(body.len() * 5 / 8);
+    let mut buffer: u16 = 0;
+    let mut bits: u8 = 0;
+
+    for (idx, byte) in body.bytes().enumerate() {
+        let value = match byte {
+            b'a'..=b'z' => byte - b'a',
+            b'2'..=b'7' => byte - b'2' + 26,
+            b'A'..=b'Z' => {
+                return Err(SignerError::AddressDerivationFailed(format!(
+                    "invalid Atto address alphabet: uppercase character at body index {idx}"
+                )))
+            }
+            _ => {
+                return Err(SignerError::AddressDerivationFailed(format!(
+                    "invalid Atto address alphabet: character {:?} at body index {idx}",
+                    byte as char
+                )))
+            }
+        };
+
+        buffer = (buffer << 5) | value as u16;
+        bits += 5;
+        while bits >= 8 {
+            let shift = bits - 8;
+            out.push(((buffer >> shift) & 0xff) as u8);
+            bits -= 8;
+            buffer &= (1 << bits) - 1;
+        }
+    }
+
+    if bits > 0 && buffer != 0 {
+        return Err(SignerError::AddressDerivationFailed(
+            "invalid Atto address padding bits".into(),
+        ));
+    }
+
+    Ok(out)
+}
+
 fn atto_checksum(payload: &[u8; 33]) -> [u8; 5] {
     let mut hasher = Blake2b::<U5>::new();
     hasher.update(payload);
@@ -50,6 +91,51 @@ pub fn atto_address(pubkey: &[u8; 32]) -> String {
     bytes[33..].copy_from_slice(&atto_checksum(&payload));
 
     format!("atto://{}", encode_base32_lower_no_pad(&bytes))
+}
+
+fn decode_atto_address_bytes(address: &str) -> Result<[u8; 38], SignerError> {
+    let body = address.strip_prefix("atto://").ok_or_else(|| {
+        SignerError::AddressDerivationFailed("invalid Atto address prefix: expected atto://".into())
+    })?;
+
+    if body.len() != 61 {
+        return Err(SignerError::AddressDerivationFailed(format!(
+            "invalid Atto address length: expected 61 base32 characters, got {}",
+            body.len()
+        )));
+    }
+
+    let decoded = decode_base32_lower_no_pad(body)?;
+    let bytes: [u8; 38] = decoded.try_into().map_err(|decoded: Vec<u8>| {
+        SignerError::AddressDerivationFailed(format!(
+            "invalid Atto address payload length: expected 38 bytes, got {}",
+            decoded.len()
+        ))
+    })?;
+
+    Ok(bytes)
+}
+
+pub fn atto_pubkey_from_address(address: &str) -> Result<[u8; 32], SignerError> {
+    let bytes = decode_atto_address_bytes(address)?;
+
+    if bytes[0] != ATTO_ADDRESS_ALGORITHM_V1 {
+        return Err(SignerError::AddressDerivationFailed(format!(
+            "unsupported Atto address algorithm byte: expected {ATTO_ADDRESS_ALGORITHM_V1}, got {}",
+            bytes[0]
+        )));
+    }
+
+    let payload: [u8; 33] = bytes[..33].try_into().expect("payload length is fixed");
+    let expected_checksum = atto_checksum(&payload);
+    if bytes[33..] != expected_checksum {
+        return Err(SignerError::AddressDerivationFailed(
+            "invalid Atto address checksum".into(),
+        ));
+    }
+
+    let public_key: [u8; 32] = bytes[1..33].try_into().expect("public key length is fixed");
+    Ok(public_key)
 }
 
 /// Atto chain signer metadata and local Ed25519 primitives.
@@ -163,6 +249,61 @@ mod tests {
         assert!(address["atto://".len()..]
             .chars()
             .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c)));
+    }
+
+    #[test]
+    fn address_decodes_to_original_pubkey() {
+        // Fixture generated from OWS' Atto codec contract: algorithm byte 0,
+        // RFC 4648 lowercase base32 without padding, BLAKE2b-5 checksum.
+        let pubkey = [0x42u8; 32];
+        let address = atto_address(&pubkey);
+        assert_eq!(
+            address,
+            "atto://abbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbeeqscijbefcvpqter6"
+        );
+        assert_eq!(atto_pubkey_from_address(&address).unwrap(), pubkey);
+    }
+
+    #[test]
+    fn address_decoder_accepts_contract_example() {
+        // Example from docs/09-atto-integration-contract.md. No source private key
+        // was published with it, so the test only verifies address decoding.
+        let address = "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw";
+        let pubkey = atto_pubkey_from_address(address).unwrap();
+        assert_eq!(pubkey.len(), 32);
+    }
+
+    #[test]
+    fn address_decoder_rejects_invalid_prefix_case_length_alphabet_algorithm_and_checksum() {
+        let valid = atto_address(&[0x42u8; 32]);
+
+        let uppercase_body = format!("atto://{}", valid["atto://".len()..].to_uppercase());
+        for (address, expected_error) in [
+            (valid.replacen("atto://", "nano://", 1), "prefix"),
+            (valid.to_uppercase(), "prefix"),
+            (uppercase_body, "alphabet"),
+            (format!("{}a", valid), "61"),
+            (valid.replacen('a', "0", 1), "prefix"),
+            (valid.replacen('b', "0", 1), "alphabet"),
+        ] {
+            let err = atto_pubkey_from_address(&address).unwrap_err();
+            assert!(
+                err.to_string().contains(expected_error),
+                "expected {expected_error:?} in {err} for {address}"
+            );
+        }
+
+        let mut decoded = decode_atto_address_bytes(&valid).unwrap();
+        decoded[0] = 1;
+        let bad_algorithm = format!("atto://{}", encode_base32_lower_no_pad(&decoded));
+        let err = atto_pubkey_from_address(&bad_algorithm).unwrap_err();
+        assert!(err.to_string().contains("algorithm"));
+
+        let mut bad_checksum = valid.clone();
+        let last = bad_checksum.pop().unwrap();
+        bad_checksum.push(if last == 'a' { 'b' } else { 'a' });
+        let err = atto_pubkey_from_address(&bad_checksum).unwrap_err();
+        assert!(err.to_string().contains("checksum"));
     }
 
     #[test]
