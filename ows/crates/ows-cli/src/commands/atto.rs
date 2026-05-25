@@ -1,5 +1,6 @@
 use crate::CliError;
 
+#[allow(clippy::too_many_arguments)]
 pub fn send(
     wallet: &str,
     chain: &str,
