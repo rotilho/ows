@@ -168,8 +168,10 @@ fn block_hash_signatures_cover_send_receive_open_and_change_serialization_inputs
 fn sign_transaction_rejects_non_canonical_block_payloads() {
     let fixtures = fixtures();
     let private_key = hex_to_vec(&fixtures.derived_accounts[0].private_key_hex);
-    let mut truncated_send = vec![2u8; 32];
-    truncated_send[0] = 2;
+    // A 32-byte payload is intentionally accepted as a precomputed canonical
+    // block hash for low-level signing compatibility. Use a truncated SEND
+    // block shape so this regression test exercises block-length validation.
+    let truncated_send = vec![2u8; 31];
     let err = AttoSigner
         .sign_transaction(&private_key, &truncated_send)
         .unwrap_err();
