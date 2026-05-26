@@ -21,7 +21,7 @@ type AssetId = `${ChainId}:${string}`;
 // e.g. "eip155:8453:native" (ETH on Base)
 ```
 
-The `native` token refers to the chain's native currency (ETH, SOL, SUI, XRP, BTC, ATOM, TRX, TON, ATTO, etc.).
+The `native` token refers to the chain's native currency (ETH, SOL, SUI, BTC, ATOM, TRX, TON, etc.).
 
 ## Chain Families
 
@@ -36,11 +36,9 @@ OWS groups chains into families that share a cryptographic curve and address der
 | Tron | secp256k1 | 195 | `m/44'/195'/0'/0/{index}` | Base58Check (`T...`) | `tron` |
 | TON | ed25519 | 607 | `m/44'/607'/{index}'` | Base64url wallet v5r1 (`UQ...`) | `ton` |
 | Sui | ed25519 | 784 | `m/44'/784'/{index}'/0'/0'` | `0x` + BLAKE2b-256 hex (32 bytes) | `sui` |
-| XRPL | secp256k1 | 144 | `m/44'/144'/0'/0/{index}` | Base58Check (`r...`) | `xrpl` |
 | Spark | secp256k1 | 8797555 | `m/84'/0'/0'/0/{index}` | `spark:` + compressed pubkey hex | `spark` |
 | Filecoin | secp256k1 | 461 | `m/44'/461'/0'/0/{index}` | `f1` + base32(blake2b-160) | `fil` |
 | NEAR | ed25519 | 397 | `m/44'/397'/{index}'` | 64-char lowercase hex of pubkey (implicit account) | `near` |
-| Atto (standalone L1 digital cash) | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase base32 URI; not Nano-compatible | `atto` (provisional) |
 
 ## Known Networks
 
@@ -55,12 +53,8 @@ Each network has a canonical chain identifier. Endpoint discovery and transport 
 | Arbitrum | `eip155:42161` |
 | Optimism | `eip155:10` |
 | Base | `eip155:8453` |
-| Plasma | `eip155:9745` |
 | BSC | `eip155:56` |
 | Avalanche | `eip155:43114` |
-| Etherlink | `eip155:42793` |
-| Tempo | `eip155:4217` |
-| Hyperliquid | `eip155:999` |
 
 ### Non-EVM Networks
 
@@ -72,17 +66,10 @@ Each network has a canonical chain identifier. Endpoint discovery and transport 
 | Tron | `tron:mainnet` |
 | TON | `ton:mainnet` |
 | Sui | `sui:mainnet` |
-| XRPL | `xrpl:mainnet` |
 | Spark | `spark:mainnet` |
 | Filecoin | `fil:mainnet` |
 | NEAR | `near:mainnet` |
 | NEAR (testnet) | `near:testnet` |
-| Atto | `atto:live` |
-| Atto (beta) | `atto:beta` |
-| Atto (dev) | `atto:dev` |
-| Atto (local) | `atto:local` |
-
-Atto is a standalone layer-1 digital cash network. It is not a Nano fork and OWS MUST NOT reuse Nano identifiers, derivation rules, block serialization, or RPC transport for Atto. Atto amounts use 9 decimals (`1 ATTO = 1,000,000,000` raw units); transfers are feeless, so there is no gas/fee field in the Atto signing model. Send/receive flows still require infrastructure: an Atto node URL for account state, receivables, and transaction publishing, plus a work-server URL for PoW generation. OWS reserves `atto:<network>` config entries for node URLs and `atto-work:<network>` entries for work-server URLs; examples should use operator-supplied URLs rather than private endpoints. Receiving funds requires discovering receivables and publishing an `OPEN` or `RECEIVE` block, not just signing a send block.
 
 Implementations MAY ship convenience endpoint defaults, but those defaults are deployment choices rather than OWS interoperability requirements.
 
@@ -93,34 +80,21 @@ Implementations MAY support shorthand aliases in CLI contexts:
 ```
 ethereum  → eip155:1
 base      → eip155:8453
-plasma    → eip155:9745
 polygon   → eip155:137
 arbitrum  → eip155:42161
 optimism  → eip155:10
 bsc       → eip155:56
 avalanche → eip155:43114
-etherlink → eip155:42793
-tempo       → eip155:4217
-hyperliquid → eip155:999
 solana    → solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
 bitcoin   → bip122:000000000019d6689c085ae165831e93
 cosmos    → cosmos:cosmoshub-4
 tron      → tron:mainnet
 ton       → ton:mainnet
 sui       → sui:mainnet
-xrpl          → xrpl:mainnet
-xrpl-mainnet  → xrpl:mainnet
-xrpl-testnet  → xrpl:testnet
-xrpl-devnet   → xrpl:devnet
 spark     → spark:mainnet
 filecoin  → fil:mainnet
 near          → near:mainnet
 near-testnet  → near:testnet
-atto          → atto:live
-atto-live     → atto:live
-atto-beta     → atto:beta
-atto-dev      → atto:dev
-atto-local    → atto:local
 ```
 
 Aliases MUST be resolved to full CAIP-2 identifiers before any processing. They MUST NOT appear in wallet files, policy files, or audit logs.
@@ -142,14 +116,12 @@ Master Seed (512 bits via PBKDF2)
     ├── m/44'/195'/0'/0/0   → Tron Account 0
     ├── m/44'/607'/0'       → TON Account 0
     ├── m/44'/784'/0'/0'/0' → Sui Account 0
-    ├── m/44'/144'/0'/0/0   → XRPL Account 0
     ├── m/84'/0'/0'/0/0     → Spark Account 0
     ├── m/44'/461'/0'/0/0   → Filecoin Account 0
-    ├── m/44'/397'/0'       → NEAR Account 0
-    └── m/44'/1869902945'/0' → Atto Account 0
+    └── m/44'/397'/0'       → NEAR Account 0
 ```
 
-For mnemonic-based wallets, a single mnemonic derives accounts across all supported chains. Those wallet files store the encrypted mnemonic, and the signer derives the appropriate private key using each chain's coin type and derivation path. Wallets imported from raw private keys instead store encrypted curve-key material directly.
+A single mnemonic derives accounts across all supported chains. The wallet file stores the encrypted mnemonic; the signer derives the appropriate private key using each chain's coin type and derivation path.
 
 ## Adding a New Chain
 
@@ -159,7 +131,7 @@ For mnemonic-based wallets, a single mnemonic derives accounts across all suppor
 4. Define the signing and message-signing behavior required by `02-signing-interface.md`.
 5. Document any transaction serialization rules needed to produce deterministic signatures.
 
-Core registry changes are required for first-class chain metadata, parser aliases, wallet account enumeration, and policy/audit chain IDs. Address codec, transaction serialization, and broadcast support remain chain-specific implementation work.
+No changes to OWS core, the signing interface, or the policy engine are needed.
 
 ## References
 
@@ -169,4 +141,3 @@ Core registry changes are required for first-class chain metadata, parser aliase
 - [BIP-39: Mnemonic Code](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)
 - [BIP-44: Multi-Account Hierarchy](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)
 - [SLIP-44: Registered Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
-- [Atto integration docs](https://atto.cash/docs/integration)

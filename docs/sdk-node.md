@@ -91,15 +91,12 @@ const addr = deriveAddress(mnemonic, "evm");
 
 const solAddr = deriveAddress(mnemonic, "solana");
 // => "DzkqyvQrBvLqKSMhCoXoGK65e9PvyWjb6YjS4BqcxN2i"
-
-const attoAddr = deriveAddress(mnemonic, "atto");
-// => "atto://..."
 ```
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mnemonic` | `string` | &mdash; | BIP-39 mnemonic phrase |
-| `chain` | `string` | &mdash; | `"evm"`, `"solana"`, `"xrpl"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"ton"`, `"spark"`, `"filecoin"`, `"nano"`, `"near"`, `"atto"` |
+| `chain` | `string` | &mdash; | `"evm"`, `"solana"`, `"xrpl"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` |
 | `index` | `number` | `0` | Account index in derivation path |
 
 **Returns:** `string`
@@ -123,8 +120,6 @@ console.log(wallet.accounts);
 //   { chainId: "sui:mainnet", address: "0x...", derivationPath: "m/44'/784'/0'/0'/0'" },
 //   { chainId: "xrpl:mainnet", address: "r...", derivationPath: "m/44'/144'/0'/0/0" },
 //   { chainId: "fil:mainnet", address: "f1...", derivationPath: "m/44'/461'/0'/0/0" },
-//   { chainId: "near:mainnet", address: "...", derivationPath: "m/44'/397'/0'" },
-//   { chainId: "atto:live", address: "atto://...", derivationPath: "m/44'/1869902945'/0'" },
 // ]
 ```
 
@@ -198,7 +193,7 @@ const keys = JSON.parse(keysJson);
 
 #### `importWalletMnemonic(name, mnemonic, passphrase?, index?, vaultPath?)`
 
-Import a wallet from a BIP-39 mnemonic. Derives all supported chain accounts, including Atto (`atto:live`), via HD paths.
+Import a wallet from a BIP-39 mnemonic. Derives all 9 chain accounts via HD paths.
 
 ```javascript
 const wallet = importWalletMnemonic("imported", "goose puzzle decorate ...");
@@ -208,7 +203,7 @@ const wallet = importWalletMnemonic("imported", "goose puzzle decorate ...");
 
 #### `importWalletPrivateKey(name, privateKeyHex, passphrase?, vaultPath?, chain?, secp256k1Key?, ed25519Key?)`
 
-Import a wallet from a hex-encoded private key. All supported chains are represented: the provided key is used for its curve's chains, and a random key is generated for the other curve.
+Import a wallet from a hex-encoded private key. All 9 chains are supported: the provided key is used for its curve's chains, and a random key is generated for the other curve.
 
 The optional `chain` parameter specifies which chain the key originates from to determine the curve. Defaults to `"evm"` (secp256k1).
 
@@ -217,13 +212,13 @@ Alternatively, provide explicit keys for each curve via `secp256k1Key` and `ed25
 ```javascript
 // Import an EVM private key — generates a random Ed25519 key for Solana/Sui/TON
 const wallet = importWalletPrivateKey("from-evm", "4c0883a691...");
-console.log(wallet.accounts.length); // => 13
+console.log(wallet.accounts.length); // => 9
 
 // Import a Solana private key — generates a random secp256k1 key for EVM/BTC/etc.
 const wallet2 = importWalletPrivateKey(
   "from-solana", "9d61b19d...", undefined, undefined, "solana"
 );
-console.log(wallet2.accounts.length); // => 13
+console.log(wallet2.accounts.length); // => 8
 
 // Import explicit keys for both curves
 const wallet3 = importWalletPrivateKey(
@@ -231,7 +226,7 @@ const wallet3 = importWalletPrivateKey(
   "4c0883a691...",  // secp256k1 key
   "9d61b19d..."     // ed25519 key
 );
-console.log(wallet3.accounts.length); // => 13
+console.log(wallet3.accounts.length); // => 8
 ```
 
 | Param | Type | Default | Description |
@@ -240,15 +235,11 @@ console.log(wallet3.accounts.length); // => 13
 | `privateKeyHex` | `string` | &mdash; | Hex-encoded private key (with or without `0x` prefix). Ignored when both curve keys are provided. |
 | `passphrase` | `string` | `undefined` | Encryption passphrase |
 | `vaultPath` | `string` | `~/.ows` | Custom vault directory root |
-| `chain` | `string` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"`, `"nano"`, `"near"`, `"atto"` (Ed25519) |
+| `chain` | `string` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"` (Ed25519) |
 | `secp256k1Key` | `string` | `undefined` | Explicit secp256k1 private key (hex). Overrides random generation for secp256k1 chains. |
 | `ed25519Key` | `string` | `undefined` | Explicit Ed25519 private key (hex). Overrides random generation for Ed25519 chains. |
 
 **Returns:** `WalletInfo`
-
-### Atto notes
-
-Atto is a standalone L1 digital cash network, not a Nano-compatible chain. Native amounts have 9 decimals and should be handled as integer raw units (`1 ATTO = 1,000,000,000` raw units). Feeless send/receive flows still require an Atto node URL for account state, receivables, and publishing plus a work-server URL for PoW. Current SDK signing support derives Atto accounts and can sign raw Atto block hashes; constructing send/open/receive blocks and broadcasting them remains an application/integration responsibility until higher-level Atto send helpers are added.
 
 ### Signing
 
