@@ -6,6 +6,9 @@ use ows_core::{
     ALL_CHAIN_TYPES,
 };
 use ows_signer::{
+    chains::atto::{
+        AttoBlock, AttoChangeBlock, AttoNetwork, AttoOpenBlock, AttoReceiveBlock, AttoSendBlock,
+    },
     decrypt, encrypt, signer_for_chain, CryptoEnvelope, Curve, HdDeriver, Mnemonic,
     MnemonicStrength, SecretBytes,
 };
@@ -783,17 +786,17 @@ pub fn atto_send_raw(
     let timestamp = atto_confirmed_timestamp_ms(&ctx.node)?;
     let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
 
-    let block = AttoBlock::Send {
-        network: ctx.network_byte,
-        version: account.version,
+    let block = AttoBlock::Send(AttoSendBlock {
+        network: ctx.network,
+        version: atto_block_version(account.version)?,
         public_key: ctx.public_key,
         height,
         balance,
-        timestamp,
+        timestamp_ms: timestamp,
         previous,
         receiver_public_key: hex_to_32(&receiver_public_key, "receiver public key")?,
         amount,
-    };
+    });
     let transaction = sign_atto_block(
         &ctx,
         block,
@@ -851,16 +854,16 @@ pub fn atto_receive_one(
                 .ok_or_else(|| OwsLibError::InvalidInput("Atto balance overflow".into()))?;
             let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
             (
-                AttoBlock::Receive {
-                    network: ctx.network_byte,
-                    version: account.version,
+                AttoBlock::Receive(AttoReceiveBlock {
+                    network: ctx.network,
+                    version: atto_block_version(account.version)?,
                     public_key: ctx.public_key,
                     height,
                     balance,
-                    timestamp,
+                    timestamp_ms: timestamp,
                     previous,
                     send_hash,
-                },
+                }),
                 serde_json::json!({
                     "type": "RECEIVE",
                     "network": ctx.network_name,
@@ -882,15 +885,15 @@ pub fn atto_receive_one(
             )
         } else {
             (
-                AttoBlock::Open {
-                    network: ctx.network_byte,
+                AttoBlock::Open(AttoOpenBlock {
+                    network: ctx.network,
                     version: 0,
                     public_key: ctx.public_key,
                     balance: amount,
-                    timestamp,
+                    timestamp_ms: timestamp,
                     send_hash,
                     representative_public_key: ctx.public_key,
-                },
+                }),
                 serde_json::json!({
                     "type": "OPEN",
                     "network": ctx.network_name,
@@ -951,19 +954,19 @@ pub fn atto_change_representative(
     let timestamp = atto_confirmed_timestamp_ms(&ctx.node)?;
     let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
 
-    let block = AttoBlock::Change {
-        network: ctx.network_byte,
-        version: account.version,
+    let block = AttoBlock::Change(AttoChangeBlock {
+        network: ctx.network,
+        version: atto_block_version(account.version)?,
         public_key: ctx.public_key,
         height,
         balance,
-        timestamp,
+        timestamp_ms: timestamp,
         previous,
         representative_public_key: hex_to_32(
             &representative_public_key,
             "representative public key",
         )?,
-    };
+    });
     let transaction = sign_atto_block(
         &ctx,
         block,
@@ -992,7 +995,7 @@ struct AttoOpContext {
     node: AttoNodeClient,
     work: AttoWorkServerClient,
     network_name: &'static str,
-    network_byte: u8,
+    network: AttoNetwork,
     address: String,
     public_key: [u8; 32],
     public_key_hex: String,
@@ -1015,7 +1018,7 @@ fn atto_context(
             chain.chain_id
         )));
     }
-    let (network_name, network_byte, network_key) = atto_network(chain.chain_id)?;
+    let (network_name, network, network_key) = atto_network(chain.chain_id)?;
     let node_url = resolve_required_url(chain.chain_id, chain.chain_type, rpc_url, "Atto RPC")?;
     let work_url = resolve_atto_work_url(network_key, work_url)?;
     let private_key = decrypt_signing_key(
@@ -1033,7 +1036,7 @@ fn atto_context(
         node: AttoNodeClient::new(node_url),
         work: AttoWorkServerClient::new(work_url),
         network_name,
-        network_byte,
+        network,
         address,
         public_key,
         public_key_hex,
@@ -1041,164 +1044,10 @@ fn atto_context(
     })
 }
 
-enum AttoBlock {
-    Send {
-        network: u8,
-        version: u32,
-        public_key: [u8; 32],
-        height: u64,
-        balance: u64,
-        timestamp: i64,
-        previous: [u8; 32],
-        receiver_public_key: [u8; 32],
-        amount: u64,
-    },
-    Receive {
-        network: u8,
-        version: u32,
-        public_key: [u8; 32],
-        height: u64,
-        balance: u64,
-        timestamp: i64,
-        previous: [u8; 32],
-        send_hash: [u8; 32],
-    },
-    Open {
-        network: u8,
-        version: u32,
-        public_key: [u8; 32],
-        balance: u64,
-        timestamp: i64,
-        send_hash: [u8; 32],
-        representative_public_key: [u8; 32],
-    },
-    Change {
-        network: u8,
-        version: u32,
-        public_key: [u8; 32],
-        height: u64,
-        balance: u64,
-        timestamp: i64,
-        previous: [u8; 32],
-        representative_public_key: [u8; 32],
-    },
-}
-
-impl AttoBlock {
-    fn serialize(&self) -> Result<Vec<u8>, OwsLibError> {
-        let mut out = Vec::with_capacity(134);
-        match self {
-            AttoBlock::Open {
-                network,
-                version,
-                public_key,
-                balance,
-                timestamp,
-                send_hash,
-                representative_public_key,
-            } => {
-                push_header(&mut out, 0, *network, *version)?;
-                out.extend_from_slice(public_key);
-                out.extend_from_slice(&balance.to_le_bytes());
-                out.extend_from_slice(&timestamp.to_le_bytes());
-                out.push(0);
-                out.extend_from_slice(send_hash);
-                out.push(0);
-                out.extend_from_slice(representative_public_key);
-            }
-            AttoBlock::Receive {
-                network,
-                version,
-                public_key,
-                height,
-                balance,
-                timestamp,
-                previous,
-                send_hash,
-            } => {
-                push_state_prefix(
-                    &mut out, 1, *network, *version, public_key, *height, *balance, *timestamp,
-                    previous,
-                )?;
-                out.push(0);
-                out.extend_from_slice(send_hash);
-            }
-            AttoBlock::Send {
-                network,
-                version,
-                public_key,
-                height,
-                balance,
-                timestamp,
-                previous,
-                receiver_public_key,
-                amount,
-            } => {
-                push_state_prefix(
-                    &mut out, 2, *network, *version, public_key, *height, *balance, *timestamp,
-                    previous,
-                )?;
-                out.push(0);
-                out.extend_from_slice(receiver_public_key);
-                out.extend_from_slice(&amount.to_le_bytes());
-            }
-            AttoBlock::Change {
-                network,
-                version,
-                public_key,
-                height,
-                balance,
-                timestamp,
-                previous,
-                representative_public_key,
-            } => {
-                push_state_prefix(
-                    &mut out, 3, *network, *version, public_key, *height, *balance, *timestamp,
-                    previous,
-                )?;
-                out.push(0);
-                out.extend_from_slice(representative_public_key);
-            }
-        }
-        Ok(out)
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn push_state_prefix(
-    out: &mut Vec<u8>,
-    block_type: u8,
-    network: u8,
-    version: u32,
-    public_key: &[u8; 32],
-    height: u64,
-    balance: u64,
-    timestamp: i64,
-    previous: &[u8; 32],
-) -> Result<(), OwsLibError> {
-    push_header(out, block_type, network, version)?;
-    out.extend_from_slice(public_key);
-    out.extend_from_slice(&height.to_le_bytes());
-    out.extend_from_slice(&balance.to_le_bytes());
-    out.extend_from_slice(&timestamp.to_le_bytes());
-    out.extend_from_slice(previous);
-    Ok(())
-}
-
-fn push_header(
-    out: &mut Vec<u8>,
-    block_type: u8,
-    network: u8,
-    version: u32,
-) -> Result<(), OwsLibError> {
-    let version = u16::try_from(version).map_err(|_| {
+fn atto_block_version(version: u32) -> Result<u16, OwsLibError> {
+    u16::try_from(version).map_err(|_| {
         OwsLibError::InvalidInput(format!("unsupported Atto block version: {version}"))
-    })?;
-    out.push(block_type);
-    out.push(network);
-    out.extend_from_slice(&version.to_le_bytes());
-    out.push(0);
-    Ok(())
+    })
 }
 
 fn sign_atto_block(
@@ -1208,7 +1057,7 @@ fn sign_atto_block(
     timestamp: i64,
     work_target: &str,
 ) -> Result<AttoTransaction, OwsLibError> {
-    let bytes = block.serialize()?;
+    let bytes = block.to_buffer();
     let signer = signer_for_chain(ChainType::Atto);
     let signature = signer.sign_transaction(ctx.private_key.expose(), &bytes)?;
     let work = ctx
@@ -1296,12 +1145,12 @@ fn hex_to_32(hex_value: &str, label: &str) -> Result<[u8; 32], OwsLibError> {
     })
 }
 
-fn atto_network(chain_id: &str) -> Result<(&'static str, u8, &'static str), OwsLibError> {
+fn atto_network(chain_id: &str) -> Result<(&'static str, AttoNetwork, &'static str), OwsLibError> {
     match chain_id {
-        "atto:live" => Ok(("LIVE", 0, "live")),
-        "atto:beta" => Ok(("BETA", 1, "beta")),
-        "atto:dev" => Ok(("DEV", 2, "dev")),
-        "atto:local" => Ok(("LOCAL", 3, "local")),
+        "atto:live" => Ok(("LIVE", AttoNetwork::Live, "live")),
+        "atto:beta" => Ok(("BETA", AttoNetwork::Beta, "beta")),
+        "atto:dev" => Ok(("DEV", AttoNetwork::Dev, "dev")),
+        "atto:local" => Ok(("LOCAL", AttoNetwork::Local, "local")),
         other => Err(OwsLibError::InvalidInput(format!(
             "unsupported Atto chain id: {other}"
         ))),
