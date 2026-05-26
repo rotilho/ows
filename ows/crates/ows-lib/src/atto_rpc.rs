@@ -11,7 +11,10 @@
 //!   `{ "work": "<16 hex chars>" }`.
 
 use crate::error::OwsLibError;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Serialize,
+};
 use serde_json::Value;
 use std::process::Command;
 
@@ -31,7 +34,9 @@ pub struct AttoAccount {
     pub network: String,
     pub version: u32,
     pub algorithm: String,
+    #[serde(deserialize_with = "u64_decimal_string")]
     pub height: AttoHeight,
+    #[serde(deserialize_with = "u64_decimal_string")]
     pub balance: AttoAmount,
     #[serde(rename = "lastTransactionHash")]
     pub last_transaction_hash: AttoHash,
@@ -41,8 +46,9 @@ pub struct AttoAccount {
     pub representative_algorithm: String,
     #[serde(rename = "representativePublicKey")]
     pub representative_public_key: AttoPublicKey,
-    #[serde(rename = "representativeAddress")]
+    #[serde(rename = "representativeAddress", default)]
     pub representative_address: AttoAddress,
+    #[serde(default)]
     pub address: AttoAddress,
 }
 
@@ -59,9 +65,11 @@ pub struct AttoReceivable {
     pub receiver_algorithm: String,
     #[serde(rename = "receiverPublicKey")]
     pub receiver_public_key: AttoPublicKey,
+    #[serde(deserialize_with = "u64_decimal_string")]
     pub amount: AttoAmount,
-    #[serde(rename = "receiverAddress")]
+    #[serde(rename = "receiverAddress", default)]
     pub receiver_address: AttoAddress,
+    #[serde(default)]
     pub address: AttoAddress,
 }
 
@@ -91,9 +99,9 @@ impl AttoTransaction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeDifferenceResponse {
-    #[serde(rename = "clientInstant")]
+    #[serde(rename = "clientInstant", deserialize_with = "instant_string_or_ms")]
     pub client_instant: AttoInstant,
-    #[serde(rename = "serverInstant")]
+    #[serde(rename = "serverInstant", deserialize_with = "instant_string_or_ms")]
     pub server_instant: AttoInstant,
     #[serde(rename = "differenceMillis")]
     pub difference_millis: i64,
@@ -359,6 +367,74 @@ fn with_min_amount(path: &str, min_amount: Option<&str>) -> String {
     }
 }
 
+fn u64_decimal_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct U64DecimalStringVisitor;
+
+    impl Visitor<'_> for U64DecimalStringVisitor {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an unsigned 64-bit integer as a JSON number or decimal string")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value.to_string())
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            u64::try_from(value)
+                .map(|value| value.to_string())
+                .map_err(|_| E::custom(format!("value {value} is not a valid u64")))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            value
+                .parse::<u64>()
+                .map(|parsed| parsed.to_string())
+                .map_err(|_| E::custom(format!("value `{value}` is not a valid u64")))
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(U64DecimalStringVisitor)
+}
+
+fn instant_string_or_ms<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Number(n) => n
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("instant number was not an i64")),
+        Value::String(s) => chrono::DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.timestamp_millis())
+            .map_err(serde::de::Error::custom),
+        other => Err(serde::de::Error::custom(format!(
+            "expected RFC3339 string or millisecond number, got {other}"
+        ))),
+    }
+}
+
 fn parse_one_or_many<T>(value: Value, label: &str) -> Result<Vec<T>, OwsLibError>
 where
     T: for<'de> Deserialize<'de>,
@@ -389,6 +465,7 @@ fn http_call(
     body: Option<&Value>,
     accept: &str,
 ) -> Result<String, OwsLibError> {
+    let is_ndjson_stream = accept == "application/x-ndjson";
     let mut args = vec![
         "-sS".to_string(),
         "-X".to_string(),
@@ -398,6 +475,16 @@ fn http_call(
         "-H".to_string(),
         format!("Accept: {accept}"),
     ];
+
+    // Atto stream endpoints are long-lived: they emit NDJSON records and keep
+    // the HTTP connection open for future updates. OWS wallet operations need a
+    // snapshot of currently available records, not an infinite subscription, so
+    // bound the curl read and parse any complete lines received before timeout.
+    if is_ndjson_stream {
+        args.push("-N".to_string());
+        args.push("--max-time".to_string());
+        args.push("15".to_string());
+    }
 
     let body_string;
     if let Some(body) = body {
@@ -418,12 +505,6 @@ fn http_call(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    if !output.status.success() {
-        return Err(OwsLibError::BroadcastFailed(format!(
-            "Atto HTTP transport failed for {method} {url}: {stderr}"
-        )));
-    }
-
     let (body, status) = stdout.rsplit_once('\n').ok_or_else(|| {
         OwsLibError::BroadcastFailed(format!(
             "Atto HTTP response missing status trailer for {method} {url}"
@@ -435,6 +516,18 @@ fn http_call(
             status.trim()
         ))
     })?;
+
+    if !output.status.success() {
+        // curl exits 28 when --max-time is reached. For long-lived Atto NDJSON
+        // streams, a timeout after receiving a 2xx response is the expected way
+        // to stop reading the subscription and use the records already emitted.
+        let curl_timed_out = output.status.code() == Some(28);
+        if !(is_ndjson_stream && curl_timed_out && (200..300).contains(&status_code)) {
+            return Err(OwsLibError::BroadcastFailed(format!(
+                "Atto HTTP transport failed for {method} {url}: {stderr}"
+            )));
+        }
+    }
 
     if !(200..300).contains(&status_code) {
         let trimmed = body.trim();
@@ -555,6 +648,75 @@ mod tests {
             "{request}"
         );
         assert_eq!(receivables[0].amount, "5");
+    }
+
+    #[test]
+    fn live_numeric_account_fields_are_normalized_as_u64_decimal_strings() {
+        let account: AttoAccount = serde_json::from_value(serde_json::json!({
+            "publicKey": PUBKEY,
+            "network": "LIVE",
+            "version": 0,
+            "algorithm": "V1",
+            "height": 2,
+            "balance": 900000000,
+            "lastTransactionHash": HASH,
+            "lastTransactionTimestamp": 1767390950976_i64,
+            "representativeAlgorithm": "V1",
+            "representativePublicKey": PUBKEY
+        }))
+        .unwrap();
+
+        assert_eq!(account.height, "2");
+        assert_eq!(account.balance, "900000000");
+        assert_eq!(account.address, "");
+        assert_eq!(account.representative_address, "");
+    }
+
+    #[test]
+    fn live_numeric_receivable_amount_is_normalized_as_u64_decimal_string() {
+        let receivable: AttoReceivable = serde_json::from_value(serde_json::json!({
+            "network": "LIVE",
+            "hash": HASH,
+            "version": 0,
+            "algorithm": "V1",
+            "publicKey": PUBKEY,
+            "timestamp": 1767390950976_i64,
+            "receiverAlgorithm": "V1",
+            "receiverPublicKey": PUBKEY,
+            "amount": 1000000000
+        }))
+        .unwrap();
+
+        assert_eq!(receivable.amount, "1000000000");
+        assert_eq!(receivable.address, "");
+        assert_eq!(receivable.receiver_address, "");
+    }
+
+    #[test]
+    fn u64_decimal_fields_reject_negative_fractional_and_overflow_values() {
+        for invalid_amount in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("18446744073709551616"),
+        ] {
+            let err = serde_json::from_value::<AttoReceivable>(serde_json::json!({
+                "network": "LIVE",
+                "hash": HASH,
+                "version": 0,
+                "algorithm": "V1",
+                "publicKey": PUBKEY,
+                "timestamp": 1767390950976_i64,
+                "receiverAlgorithm": "V1",
+                "receiverPublicKey": PUBKEY,
+                "amount": invalid_amount
+            }))
+            .unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains("u64") || message.contains("unsigned 64-bit"),
+                "{message}"
+            );
+        }
     }
 
     #[test]
