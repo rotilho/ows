@@ -274,7 +274,8 @@ ows sign message --wallet "my-wallet" --chain bitcoin --message "hello world"
 # Base via bare chain ID
 ows sign message --wallet "my-wallet" --chain 8453 --message "hello world"
 
-# Atto signs raw Ed25519 bytes for messages; this is not Nano-compatible formatting.
+# Atto uses domain-separated message signing:
+# BLAKE2b-512("ATTO Signed Message v1" || publicKey || u64_be(message.length) || message), then Ed25519.
 ows sign message --wallet "my-wallet" --chain atto --message "hello atto"
 ```
 

@@ -12,7 +12,7 @@
       "private_key_hex": "bcc806481fd45b8cf5c69c605b9424b75b76ae5c36823a83001e436d3653c97f",
       "public_key_hex": "d868642176e4b7ce32c41295e9b89a1b100821e2632aa827a95913055848f727",
       "address": "atto://admgqzbbo3slptrsyqjjl2nytinracbb4jrsvkbhvfmrgbkyjd3sor3ozzrtg",
-      "message_signature_hex": "b6e2bc6d980b9b2bbe77c3c33ca1a22fd41b2f6c9fcaf654cd10394d77cf2935160371d86fc832b68c1ae8b0fb1ca689cced77cbd00e87fedbeca15519a2be09"
+      "message_signature_hex": "c71243c448eed3f9cedea84adaacec14cf6521d32c725e4f2452b827c2939559c6a4dd5aeb3d795550280c202695ab637e66999fe6a9cb02f963fb0072f79e08"
     },
     {
       "index": 1,
@@ -20,7 +20,7 @@
       "private_key_hex": "52befe9345c1bce443de26a689935400340d17c3eee08942005c17b6bc180782",
       "public_key_hex": "2604ea31b92487ad27a0dcb3996aee8000eebc1f4f531ca818f167754a1a1b8d",
       "address": "atto://aataj2rrxesipljhudolhglk52aab3v4d5hvghfiddywo5kkdiny2jzvwfxac",
-      "message_signature_hex": "4f05c9b4d3050dac92673d324a0b6375c95d73079810bd40da0a576030edf1e55edd015db957dd1aabc78c227da26cf923d0b691c0e31c39d6d7626c78f31909"
+      "message_signature_hex": "790c544b4c6313e22e13231e26e80e60bcfe09385b61451d94bcf0fc090312f5b1ade4c532244f84627da5babf3f1acfcdbfa1ceab6538817491aecad9ad600b"
     }
   ],
   "address_codec": {
