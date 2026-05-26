@@ -10,7 +10,7 @@ Local, policy-gated signing and wallet management for every chain.
 ## Why OWS
 
 - **Local key custody.** Private keys stay encrypted at rest and are decrypted only inside the OWS signing path after the relevant checks pass. Current implementations harden in-process memory handling and wipe key material after use.
-- **Every chain, one interface.** EVM, Solana, XRPL, Sui, Bitcoin, Cosmos, Tron, TON, Spark, Filecoin — all first-class. CAIP-2/CAIP-10 addressing abstracts away chain-specific details.
+- **Every chain, one interface.** EVM, Solana, XRPL, Sui, Bitcoin, Cosmos, Tron, TON, Spark, Filecoin, Nano, NEAR, and Atto (a standalone L1 digital cash network) — all first-class. CAIP-2/CAIP-10 addressing abstracts away chain-specific details.
 - **Policy before signing.** A pre-signing policy engine gates agent (API key) operations before decryption — chain allowlists, expiry, and optional custom executables.
 - **Built for agents.** Native SDK and CLI today. A wallet created by one tool works in every other.
 
@@ -50,13 +50,17 @@ ows sign tx --wallet agent-treasury --chain bitcoin --tx "0200000001..."
 
 # Use a bare EVM chain ID for Base
 ows sign tx --wallet agent-treasury --chain 8453 --tx "02f8..."
+
+# Derive and sign for Atto (standalone L1). Atto tx signing expects a 32-byte canonical block hash.
+echo "$OWS_MNEMONIC" | ows mnemonic derive --chain atto
+ows sign tx --wallet agent-treasury --chain atto --tx "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
 ```javascript
 import { createWallet, signMessage } from "@open-wallet-standard/core";
 
 const wallet = createWallet("agent-treasury");
-// => accounts for EVM, Solana, Bitcoin, Cosmos, Tron, TON, Filecoin, Sui, and XRPL
+// => accounts for EVM, Solana, Bitcoin, Cosmos, Tron, TON, Spark, Filecoin, Sui, XRPL, Nano, NEAR, and Atto
 
 const sig = signMessage("agent-treasury", "evm", "hello");
 console.log(sig.signature);
@@ -66,7 +70,7 @@ console.log(sig.signature);
 from ows import create_wallet, sign_message
 
 wallet = create_wallet("agent-treasury")
-# => accounts for EVM, Solana, Bitcoin, Cosmos, Tron, TON, Filecoin, Sui, and XRPL
+# => accounts for EVM, Solana, Bitcoin, Cosmos, Tron, TON, Spark, Filecoin, Sui, XRPL, Nano, NEAR, and Atto
 
 sig = sign_message("agent-treasury", "evm", "hello")
 print(sig["signature"])
@@ -110,6 +114,9 @@ Agent / CLI / App
 | Spark (Bitcoin L2) | secp256k1 | spark: prefixed | `m/84'/0'/0'/0/0` |
 | Filecoin | secp256k1 | f1 base32 | `m/44'/461'/0'/0/0` |
 | XRPL | secp256k1 | base58check | `m/44'/144'/0'/0/0`|
+| Nano | Ed25519 | nano_ prefixed | `m/44'/165'/0'` |
+| NEAR | Ed25519 | implicit hex (64 chars) | `m/44'/397'/0'` |
+| Atto (standalone L1) | Ed25519 | `atto://` URI (not Nano-compatible) | `m/44'/1869902945'/0'` |
 
 ## CLI Reference
 
@@ -147,6 +154,7 @@ The full spec lives in [`docs/`](docs/) and at [openwallet.sh](https://openwalle
 7. [Wallet Lifecycle](docs/06-wallet-lifecycle.md) — Creation, recovery, deletion, and rotation
 8. [Supported Chains](docs/07-supported-chains.md) — Chain families, canonical identifiers, and derivation rules
 9. [Conformance and Security](docs/08-conformance-and-security.md) — Interop testing and security requirements
+10. [Atto Integration Contract](docs/09-atto-integration-contract.md) — Provisional Atto identifiers, derivation, address, amount, and signing scope
 
 Reference implementation documentation:
 

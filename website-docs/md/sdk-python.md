@@ -22,6 +22,8 @@ from ows import (
     create_wallet,
     list_wallets,
     sign_message,
+    sign_hash,
+    sign_authorization,
     sign_typed_data,
     delete_wallet,
 )
@@ -87,12 +89,15 @@ addr = derive_address(mnemonic, "evm")
 
 sol_addr = derive_address(mnemonic, "solana")
 # => "DzkqyvQrBvLqKSMhCoXoGK65e9PvyWjb6YjS4BqcxN2i"
+
+atto_addr = derive_address(mnemonic, "atto")
+# => "atto://..."
 ```
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mnemonic` | `str` | &mdash; | BIP-39 mnemonic phrase |
-| `chain` | `str` | &mdash; | `"evm"`, `"solana"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"ton"`, `"spark"`, `"filecoin"` |
+| `chain` | `str` | &mdash; | `"evm"`, `"solana"`, `"xrpl"`, `"sui"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"ton"`, `"spark"`, `"filecoin"`, `"nano"`, `"near"`, `"atto"` |
 | `index` | `int` | `0` | Account index in derivation path |
 
 ### Wallet Management
@@ -162,7 +167,7 @@ keys = json.loads(export_wallet("pk-wallet"))
 
 #### `import_wallet_mnemonic(name, mnemonic, passphrase=None, index=None, vault_path=None)`
 
-Import a wallet from a BIP-39 mnemonic. Derives all 8 chain accounts via HD paths.
+Import a wallet from a BIP-39 mnemonic. Derives all supported chain accounts, including Atto (`atto:live`), via HD paths.
 
 ```python
 wallet = import_wallet_mnemonic("imported", "goose puzzle decorate ...")
@@ -170,7 +175,7 @@ wallet = import_wallet_mnemonic("imported", "goose puzzle decorate ...")
 
 #### `import_wallet_private_key(name, private_key_hex, chain=None, passphrase=None, vault_path=None, secp256k1_key=None, ed25519_key=None)`
 
-Import a wallet from a hex-encoded private key. All 8 chains are supported: the provided key is used for its curve's chains, and a random key is generated for the other curve.
+Import a wallet from a hex-encoded private key. All supported chains are represented: the provided key is used for its curve's chains, and a random key is generated for the other curve.
 
 The optional `chain` parameter specifies which chain the key originates from to determine the curve. Defaults to `"evm"` (secp256k1).
 
@@ -179,13 +184,13 @@ Alternatively, provide explicit keys for each curve via `secp256k1_key` and `ed2
 ```python
 # Import an EVM private key — generates a random Ed25519 key for Solana/Sui/TON
 wallet = import_wallet_private_key("from-evm", "4c0883a691...")
-print(len(wallet["accounts"]))  # => 8
+print(len(wallet["accounts"]))  # => 13
 
 # Import a Solana private key — generates a random secp256k1 key for EVM/BTC/etc.
 wallet = import_wallet_private_key(
     "from-solana", "9d61b19d...", chain="solana"
 )
-print(len(wallet["accounts"]))  # => 8
+print(len(wallet["accounts"]))  # => 13
 
 # Import explicit keys for both curves
 wallet = import_wallet_private_key(
@@ -193,18 +198,22 @@ wallet = import_wallet_private_key(
     secp256k1_key="4c0883a691...",
     ed25519_key="9d61b19d..."
 )
-print(len(wallet["accounts"]))  # => 8
+print(len(wallet["accounts"]))  # => 13
 ```
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | &mdash; | Wallet name |
 | `private_key_hex` | `str` | &mdash; | Hex-encoded private key. Ignored when both curve keys are provided. |
-| `chain` | `str` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"` (Ed25519) |
+| `chain` | `str` | `"evm"` | Source chain: `"evm"`, `"bitcoin"`, `"cosmos"`, `"tron"`, `"filecoin"` (secp256k1) or `"solana"`, `"sui"`, `"ton"`, `"nano"`, `"near"`, `"atto"` (Ed25519) |
 | `passphrase` | `str` | `None` | Encryption passphrase |
 | `vault_path` | `str` | `None` | Custom vault directory |
 | `secp256k1_key` | `str` | `None` | Explicit secp256k1 private key (hex) |
 | `ed25519_key` | `str` | `None` | Explicit Ed25519 private key (hex) |
+
+### Atto notes
+
+Atto is a standalone L1 digital cash network, not a Nano-compatible chain. Native amounts have 9 decimals and should be handled as integer raw units (`1 ATTO = 1,000,000,000` raw units). Feeless send/receive flows still require an Atto node URL for account state, receivables, and publishing plus a work-server URL for PoW. Current SDK signing support derives Atto accounts and can sign raw Atto block hashes; constructing send/open/receive blocks and broadcasting them remains an application/integration responsibility until higher-level Atto send helpers are added.
 
 ### Signing
 
@@ -218,11 +227,40 @@ print(result["signature"])   # hex string
 print(result["recovery_id"]) # 0 or 1
 ```
 
+#### `sign_hash(wallet, chain, hash_hex, passphrase=None, index=None, vault_path=None)`
+
+Sign a raw 32-byte hash without adding a message prefix.
+
+This operation is only supported on secp256k1-backed chains. For EVM, the returned `recovery_id` is the raw `y_parity` value (`0` or `1`).
+
+```python
+result = sign_hash("agent-treasury", "base", "11" * 32)
+print(result["signature"])
+print(result["recovery_id"])  # 0 or 1
+```
+
+#### `sign_authorization(wallet, chain, address, nonce, passphrase=None, index=None, vault_path=None)`
+
+Sign an EIP-7702 authorization tuple. This is equivalent to:
+
+`sign_hash(wallet, chain, keccak256(0x05 || rlp([eip155_chain_id(chain), address, nonce])))`
+
+`chain` must resolve to an EVM chain. `nonce` accepts decimal or `0x`-prefixed hex strings. If you need a nonstandard authorization tuple, such as chain ID `0`, precompute the digest and call `sign_hash`.
+
+```python
+result = sign_authorization(
+    "agent-treasury",
+    "base",
+    "0x1111111111111111111111111111111111111111",
+    "7",
+)
+print(result["signature"])
+print(result["recovery_id"])  # 0 or 1
+```
+
 #### `sign_typed_data(wallet, chain, typed_data_json, passphrase=None, index=None, vault_path=None)`
 
 Sign EIP-712 typed structured data (EVM only).
-
-Current implementations support typed-data signing for owner-mode credentials. API-token typed-data signing is not yet supported.
 
 ```python
 import json
