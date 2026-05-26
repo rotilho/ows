@@ -4,10 +4,9 @@ use k256::ecdsa::signature::hazmat::PrehashSigner;
 use k256::ecdsa::SigningKey;
 use k256::PublicKey;
 use ows_core::ChainType;
+use sha2::{Digest, Sha512};
 use xrpl::core::binarycodec::{decode as xrpl_decode, encode as xrpl_encode};
-use xrpl::core::keypairs::{
-    derive_classic_address, CryptoImplementation, Secp256k1 as XrplSecp256k1,
-};
+use xrpl::core::keypairs::derive_classic_address;
 
 /// XRPL chain signer (secp256k1).
 ///
@@ -93,8 +92,7 @@ impl ChainSigner for XrplSigner {
             ));
         }
 
-        // Validate private key before signing.
-        SigningKey::from_slice(private_key)
+        let signing_key = SigningKey::from_slice(private_key)
             .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
 
         // STX\0 (0x53545800) is the XRPL single-signing hash prefix. It is prepended
@@ -103,15 +101,16 @@ impl ChainSigner for XrplSigner {
         prefixed.extend_from_slice(&[0x53, 0x54, 0x58, 0x00]);
         prefixed.extend_from_slice(tx_bytes);
 
-        // xrpl-rust's Secp256k1::sign hashes with SHA512-half internally.
-        // The key format expected is "00"-prefixed uppercase hex (secp256k1 convention).
-        let privkey_hex = format!("00{}", hex::encode_upper(private_key));
-        let sig_bytes = XrplSecp256k1
-            .sign(&prefixed, &privkey_hex)
+        let digest = Sha512::digest(&prefixed);
+        let digest: [u8; 32] = digest[..32]
+            .try_into()
+            .expect("SHA-512 output is always 64 bytes");
+        let sig: k256::ecdsa::Signature = signing_key
+            .sign_prehash(&digest)
             .map_err(|e| SignerError::SigningFailed(e.to_string()))?;
 
         Ok(SignOutput {
-            signature: sig_bytes,
+            signature: sig.to_der().as_bytes().to_vec(),
             recovery_id: None,
             public_key: None,
         })
