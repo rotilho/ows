@@ -1,3 +1,4 @@
+use blake2::{digest::consts::U64, Blake2b, Digest};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use ows_signer::chains::atto::{
     atto_address, atto_block_hash, atto_pubkey_from_address, AttoSigner,
@@ -6,6 +7,7 @@ use ows_signer::{ChainSigner, Curve, HdDeriver, Mnemonic};
 use serde::Deserialize;
 
 const FIXTURES: &str = include_str!("fixtures/atto/signer_vectors.json");
+const ATTO_SIGNED_MESSAGE_DOMAIN: &[u8] = b"ATTO Signed Message v1";
 
 #[derive(Debug, Deserialize)]
 struct SignerFixtures {
@@ -102,13 +104,19 @@ fn mnemonic_indices_derive_expected_ed25519_keys_and_atto_addresses() {
             account.message_signature_hex
         );
 
+        let message = hex_to_vec(&fixtures.message_hex);
         let public_key_bytes: [u8; 32] = signature.public_key.unwrap().try_into().unwrap();
         let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).unwrap();
         let signature_bytes: [u8; 64] = signature.signature.try_into().unwrap();
         let signature = Signature::from_bytes(&signature_bytes);
-        verifying_key
-            .verify(&hex_to_vec(&fixtures.message_hex), &signature)
-            .unwrap();
+        let mut preimage = Vec::new();
+        preimage.extend_from_slice(ATTO_SIGNED_MESSAGE_DOMAIN);
+        preimage.extend_from_slice(&public_key_bytes);
+        preimage.extend_from_slice(&(message.len() as u64).to_be_bytes());
+        preimage.extend_from_slice(&message);
+        let digest = Blake2b::<U64>::digest(&preimage);
+        verifying_key.verify(&digest, &signature).unwrap();
+        assert!(verifying_key.verify(&message, &signature).is_err());
     }
 }
 

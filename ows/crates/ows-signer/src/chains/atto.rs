@@ -1,6 +1,6 @@
 use crate::curve::Curve;
 use crate::traits::{ChainSigner, SignOutput, SignerError};
-use blake2::digest::{consts::U32, consts::U5, Digest};
+use blake2::digest::{consts::U32, consts::U5, consts::U64, Digest};
 use blake2::Blake2b;
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use ows_core::ChainType;
@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 const ATTO_COIN_TYPE: u32 = 1_869_902_945;
 const ATTO_ADDRESS_ALGORITHM_V1: u8 = 0;
+const ATTO_SIGNED_MESSAGE_DOMAIN: &[u8] = b"ATTO Signed Message v1";
 const RFC4648_BASE32_LOWER: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 /// Encode bytes using RFC 4648 base32 without padding, lowercased.
@@ -653,6 +654,15 @@ impl AttoSigner {
         })?;
         Ok(SigningKey::from_bytes(&key_bytes))
     }
+
+    fn signed_message_digest(public_key: &[u8; 32], message: &[u8]) -> [u8; 64] {
+        let mut hasher = Blake2b::<U64>::new();
+        hasher.update(ATTO_SIGNED_MESSAGE_DOMAIN);
+        hasher.update(public_key);
+        hasher.update((message.len() as u64).to_be_bytes());
+        hasher.update(message);
+        hasher.finalize().into()
+    }
 }
 
 impl ChainSigner for AttoSigner {
@@ -728,7 +738,15 @@ impl ChainSigner for AttoSigner {
     }
 
     fn sign_message(&self, private_key: &[u8], message: &[u8]) -> Result<SignOutput, SignerError> {
-        self.sign(private_key, message)
+        let signing_key = Self::signing_key(private_key)?;
+        let public_key = signing_key.verifying_key().to_bytes();
+        let digest = Self::signed_message_digest(&public_key, message);
+        let signature = signing_key.sign(&digest);
+        Ok(SignOutput {
+            signature: signature.to_bytes().to_vec(),
+            recovery_id: None,
+            public_key: Some(public_key.to_vec()),
+        })
     }
 
     fn default_derivation_path(&self, index: u32) -> String {
@@ -849,7 +867,7 @@ mod tests {
     }
 
     #[test]
-    fn sign_verify_roundtrip() {
+    fn sign_message_uses_atto_domain_separated_hash() {
         let key = derive_key(0);
         let signer = AttoSigner;
         let message = b"atto message";
@@ -857,7 +875,16 @@ mod tests {
         let public_key =
             VerifyingKey::from_bytes(&output.public_key.unwrap().try_into().unwrap()).unwrap();
         let signature = ed25519_dalek::Signature::from_bytes(&output.signature.try_into().unwrap());
-        public_key.verify(message, &signature).unwrap();
+
+        let mut preimage = Vec::new();
+        preimage.extend_from_slice(b"ATTO Signed Message v1");
+        preimage.extend_from_slice(public_key.as_bytes());
+        preimage.extend_from_slice(&(message.len() as u64).to_be_bytes());
+        preimage.extend_from_slice(message);
+        let digest = Blake2b::<U64>::digest(&preimage);
+
+        public_key.verify(&digest, &signature).unwrap();
+        assert!(public_key.verify(message, &signature).is_err());
     }
 
     #[test]
