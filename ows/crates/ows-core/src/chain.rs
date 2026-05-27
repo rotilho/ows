@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_all_chain_types() {
-        assert_eq!(ALL_CHAIN_TYPES.len(), 12);
+        assert_eq!(ALL_CHAIN_TYPES.len(), 13);
     }
 
     #[test]
