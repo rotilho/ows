@@ -679,8 +679,7 @@ mod tests {
 
     #[test]
     fn test_all_chain_types() {
-        assert_eq!(ALL_CHAIN_TYPES.len(), 13);
-        assert!(ALL_CHAIN_TYPES.contains(&ChainType::Atto));
+        assert_eq!(ALL_CHAIN_TYPES.len(), 12);
     }
 
     #[test]
@@ -712,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_chain_atto_aliases_and_caip2() {
+    fn test_parse_chain_atto() {
         let chain = parse_chain("atto").unwrap();
         assert_eq!(chain.name, "atto");
         assert_eq!(chain.chain_type, ChainType::Atto);

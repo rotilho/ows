@@ -29,15 +29,3 @@ pub struct SignResult {
 pub struct SendResult {
     pub tx_hash: String,
 }
-
-/// Result from a high-level Atto wallet operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttoWalletOpResult {
-    pub status: String,
-    pub block_type: String,
-    pub address: String,
-    pub height: String,
-    pub balance: String,
-    pub hash: Option<String>,
-    pub receivable_hash: Option<String>,
-}

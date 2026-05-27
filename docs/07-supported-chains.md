@@ -40,7 +40,7 @@ OWS groups chains into families that share a cryptographic curve and address der
 | Spark | secp256k1 | 8797555 | `m/84'/0'/0'/0/{index}` | `spark:` + compressed pubkey hex | `spark` |
 | Filecoin | secp256k1 | 461 | `m/44'/461'/0'/0/{index}` | `f1` + base32(blake2b-160) | `fil` |
 | NEAR | ed25519 | 397 | `m/44'/397'/{index}'` | 64-char lowercase hex of pubkey (implicit account) | `near` |
-| Atto (standalone L1 digital cash) | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase base32 URI; not Nano-compatible | `atto` (provisional) |
+| Atto | ed25519 | 1869902945 | `m/44'/1869902945'/{index}'` | `atto://` + 61-char lowercase unpadded Base32 | `atto` |
 
 ## Known Networks
 
@@ -81,8 +81,6 @@ Each network has a canonical chain identifier. Endpoint discovery and transport 
 | Atto (beta) | `atto:beta` |
 | Atto (dev) | `atto:dev` |
 | Atto (local) | `atto:local` |
-
-Atto is a standalone layer-1 digital cash network. It is not a Nano fork and OWS MUST NOT reuse Nano identifiers, derivation rules, block serialization, or RPC transport for Atto. Atto amounts use 9 decimals (`1 ATTO = 1,000,000,000` raw units); transfers are feeless, so there is no gas/fee field in the Atto signing model. Send/receive flows still require infrastructure: an Atto node URL for account state, receivables, and transaction publishing, plus a work-server URL for PoW generation. OWS reserves `atto:<network>` config entries for node URLs and `atto-work:<network>` entries for work-server URLs; examples should use operator-supplied URLs rather than private endpoints. Receiving funds requires discovering receivables and publishing an `OPEN` or `RECEIVE` block, not just signing a send block.
 
 Implementations MAY ship convenience endpoint defaults, but those defaults are deployment choices rather than OWS interoperability requirements.
 
@@ -159,7 +157,7 @@ For mnemonic-based wallets, a single mnemonic derives accounts across all suppor
 4. Define the signing and message-signing behavior required by `02-signing-interface.md`.
 5. Document any transaction serialization rules needed to produce deterministic signatures.
 
-Core registry changes are required for first-class chain metadata, parser aliases, wallet account enumeration, and policy/audit chain IDs. Address codec, transaction serialization, and broadcast support remain chain-specific implementation work.
+No changes to OWS core, the signing interface, or the policy engine are needed.
 
 ## References
 
@@ -169,4 +167,3 @@ Core registry changes are required for first-class chain metadata, parser aliase
 - [BIP-39: Mnemonic Code](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)
 - [BIP-44: Multi-Account Hierarchy](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)
 - [SLIP-44: Registered Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
-- [Atto integration docs](https://atto.cash/docs/integration)

@@ -76,16 +76,31 @@ impl Config {
         rpc.insert("nano:mainnet".into(), "https://rpc.nano.to".into());
         rpc.insert("near:mainnet".into(), "https://rpc.mainnet.near.org".into());
         rpc.insert("near:testnet".into(), "https://rpc.testnet.near.org".into());
-        // Atto endpoints are intentionally placeholders: users/operators must
-        // configure their own node and work-server URLs instead of relying on
-        // private infrastructure baked into OWS.
-        rpc.insert("atto:live".into(), "".into());
-        rpc.insert("atto:beta".into(), "".into());
-        rpc.insert("atto:dev".into(), "".into());
+        rpc.insert(
+            "atto:live".into(),
+            "https://gatekeeper.live.application.atto.cash".into(),
+        );
+        rpc.insert(
+            "atto:beta".into(),
+            "https://gatekeeper.beta.application.atto.cash".into(),
+        );
+        rpc.insert(
+            "atto:dev".into(),
+            "https://gatekeeper.dev.application.atto.cash".into(),
+        );
         rpc.insert("atto:local".into(), "".into());
-        rpc.insert("atto-work:live".into(), "".into());
-        rpc.insert("atto-work:beta".into(), "".into());
-        rpc.insert("atto-work:dev".into(), "".into());
+        rpc.insert(
+            "atto-work:live".into(),
+            "https://gatekeeper.live.application.atto.cash".into(),
+        );
+        rpc.insert(
+            "atto-work:beta".into(),
+            "https://gatekeeper.beta.application.atto.cash".into(),
+        );
+        rpc.insert(
+            "atto-work:dev".into(),
+            "https://gatekeeper.dev.application.atto.cash".into(),
+        );
         rpc.insert("atto-work:local".into(), "".into());
         rpc.insert("eip155:4217".into(), "https://rpc.tempo.xyz".into());
         rpc.insert(
@@ -235,8 +250,14 @@ mod tests {
             config.rpc_url("eip155:999"),
             Some("https://rpc.hyperliquid.xyz/evm")
         );
-        assert_eq!(config.rpc_url("atto:live"), Some(""));
-        assert_eq!(config.rpc_url("atto-work:live"), Some(""));
+        assert_eq!(
+            config.rpc_url("atto:live"),
+            Some("https://gatekeeper.live.application.atto.cash")
+        );
+        assert_eq!(
+            config.rpc_url("atto-work:live"),
+            Some("https://gatekeeper.live.application.atto.cash")
+        );
     }
 
     #[test]

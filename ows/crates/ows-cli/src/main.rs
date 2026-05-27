@@ -58,11 +58,6 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ConfigCommands,
     },
-    /// High-level Atto wallet operations
-    Atto {
-        #[command(subcommand)]
-        subcommand: AttoCommands,
-    },
     /// Update ows to the latest release
     Update {
         /// Re-download even if already on the latest version
@@ -102,7 +97,7 @@ enum WalletCommands {
         /// Import a raw private key (from OWS_PRIVATE_KEY env or stdin)
         #[arg(long)]
         private_key: bool,
-        /// Source chain for private key import (determines curve: evm/bitcoin/cosmos/tron/filecoin = secp256k1, solana/ton/nano/near/atto = ed25519)
+        /// Source chain for private key import (determines curve: evm/bitcoin/cosmos/tron = secp256k1, solana/ton = ed25519)
         #[arg(long)]
         chain: Option<String>,
         /// Account index for HD derivation (mnemonic only)
@@ -143,7 +138,7 @@ enum WalletCommands {
 enum SignCommands {
     /// Sign a message with chain-specific formatting (EIP-191, Bitcoin message signing, etc.)
     Message {
-        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -167,7 +162,7 @@ enum SignCommands {
     },
     /// Sign a transaction (accepts hex-encoded unsigned transaction bytes)
     Tx {
-        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -185,7 +180,7 @@ enum SignCommands {
     },
     /// Sign and broadcast a transaction
     SendTx {
-        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453)
+        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453)
         #[arg(long)]
         chain: String,
         /// Wallet name or ID (uses stored encrypted mnemonic)
@@ -214,9 +209,9 @@ enum MnemonicCommands {
         #[arg(long, default_value = "12")]
         words: u32,
     },
-    /// Derive an address from a mnemonic (for example --chain atto; reads from OWS_MNEMONIC env or stdin)
+    /// Derive an address from a mnemonic (reads from OWS_MNEMONIC env or stdin)
     Derive {
-        /// Chain name (ethereum, base, arbitrum, solana, atto, ...), CAIP-2 ID (eip155:8453, atto:live), or EVM chain ID (8453). If omitted, derives all chains.
+        /// Chain name (ethereum, base, arbitrum, solana, ...), CAIP-2 ID (eip155:8453), or EVM chain ID (8453). If omitted, derives all chains.
         #[arg(long)]
         chain: Option<String>,
         /// Account index
@@ -344,82 +339,6 @@ enum KeyCommands {
 enum ConfigCommands {
     /// Show current configuration and RPC endpoints
     Show,
-}
-
-#[derive(Subcommand)]
-enum AttoCommands {
-    /// Send raw Atto units to an atto:// address
-    Send {
-        /// Wallet name or ID
-        #[arg(long, env = "OWS_WALLET")]
-        wallet: String,
-        /// Atto chain name or CAIP-2 ID (atto, atto-beta, atto-dev, atto-local)
-        #[arg(long, default_value = "atto")]
-        chain: String,
-        /// Destination atto:// address
-        #[arg(long)]
-        to: String,
-        /// Positive integer raw Atto amount
-        #[arg(long)]
-        amount: String,
-        /// Account index
-        #[arg(long, default_value = "0")]
-        index: u32,
-        /// Override configured Atto node URL
-        #[arg(long)]
-        rpc_url: Option<String>,
-        /// Override configured Atto work-server URL
-        #[arg(long)]
-        work_url: Option<String>,
-        /// Output structured JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Receive or open exactly one pending Atto receivable
-    Receive {
-        /// Wallet name or ID
-        #[arg(long, env = "OWS_WALLET")]
-        wallet: String,
-        /// Atto chain name or CAIP-2 ID (atto, atto-beta, atto-dev, atto-local)
-        #[arg(long, default_value = "atto")]
-        chain: String,
-        /// Account index
-        #[arg(long, default_value = "0")]
-        index: u32,
-        /// Override configured Atto node URL
-        #[arg(long)]
-        rpc_url: Option<String>,
-        /// Override configured Atto work-server URL
-        #[arg(long)]
-        work_url: Option<String>,
-        /// Output structured JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Change the Atto account representative
-    ChangeRepresentative {
-        /// Wallet name or ID
-        #[arg(long, env = "OWS_WALLET")]
-        wallet: String,
-        /// Atto chain name or CAIP-2 ID (atto, atto-beta, atto-dev, atto-local)
-        #[arg(long, default_value = "atto")]
-        chain: String,
-        /// New representative atto:// address
-        #[arg(long)]
-        representative: String,
-        /// Account index
-        #[arg(long, default_value = "0")]
-        index: u32,
-        /// Override configured Atto node URL
-        #[arg(long)]
-        rpc_url: Option<String>,
-        /// Override configured Atto work-server URL
-        #[arg(long)]
-        work_url: Option<String>,
-        /// Output structured JSON
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -590,59 +509,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
         },
         Commands::Config { subcommand } => match subcommand {
             ConfigCommands::Show => commands::config::show(),
-        },
-        Commands::Atto { subcommand } => match subcommand {
-            AttoCommands::Send {
-                wallet,
-                chain,
-                to,
-                amount,
-                index,
-                rpc_url,
-                work_url,
-                json,
-            } => commands::atto::send(
-                &wallet,
-                &chain,
-                &to,
-                &amount,
-                index,
-                rpc_url.as_deref(),
-                work_url.as_deref(),
-                json,
-            ),
-            AttoCommands::Receive {
-                wallet,
-                chain,
-                index,
-                rpc_url,
-                work_url,
-                json,
-            } => commands::atto::receive(
-                &wallet,
-                &chain,
-                index,
-                rpc_url.as_deref(),
-                work_url.as_deref(),
-                json,
-            ),
-            AttoCommands::ChangeRepresentative {
-                wallet,
-                chain,
-                representative,
-                index,
-                rpc_url,
-                work_url,
-                json,
-            } => commands::atto::change_representative(
-                &wallet,
-                &chain,
-                &representative,
-                index,
-                rpc_url.as_deref(),
-                work_url.as_deref(),
-                json,
-            ),
         },
         Commands::Update { force } => commands::update::run(force),
         Commands::Uninstall { purge } => commands::uninstall::run(purge),

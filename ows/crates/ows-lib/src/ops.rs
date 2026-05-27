@@ -6,18 +6,13 @@ use ows_core::{
     ALL_CHAIN_TYPES,
 };
 use ows_signer::{
-    chains::atto::{
-        AttoBlock, AttoChangeBlock, AttoNetwork, AttoOpenBlock, AttoReceiveBlock, AttoSendBlock,
-    },
     decrypt, encrypt, signer_for_chain, CryptoEnvelope, Curve, HdDeriver, Mnemonic,
     MnemonicStrength, SecretBytes,
 };
 
-use crate::atto_rpc::{
-    AttoNodeClient, AttoPublishStatus, AttoTransaction, AttoWorkRequest, AttoWorkServerClient,
-};
+use crate::atto_rpc::{AttoWorkRequest, AttoWorkServerClient};
 use crate::error::OwsLibError;
-use crate::types::{AccountInfo, AttoWalletOpResult, SendResult, SignResult, WalletInfo};
+use crate::types::{AccountInfo, SendResult, SignResult, WalletInfo};
 use crate::vault;
 
 /// Convert an EncryptedWallet to the binding-friendly WalletInfo.
@@ -42,6 +37,14 @@ fn parse_chain(s: &str) -> Result<ows_core::Chain, OwsLibError> {
     ows_core::parse_chain(s).map_err(OwsLibError::InvalidInput)
 }
 
+fn wallet_account_id(chain: &ows_core::Chain, address: &str) -> String {
+    let account = match chain.chain_type {
+        ChainType::Atto => address.strip_prefix("atto://").unwrap_or(address),
+        _ => address,
+    };
+    format!("{}:{account}", chain.chain_id)
+}
+
 /// Derive accounts for all chain families from a mnemonic at the given index.
 fn derive_all_accounts(mnemonic: &Mnemonic, index: u32) -> Result<Vec<WalletAccount>, OwsLibError> {
     let mut accounts = Vec::with_capacity(ALL_CHAIN_TYPES.len());
@@ -52,7 +55,7 @@ fn derive_all_accounts(mnemonic: &Mnemonic, index: u32) -> Result<Vec<WalletAcco
         let curve = signer.curve();
         let key = HdDeriver::derive_from_mnemonic(mnemonic, "", &path, curve)?;
         let address = signer.derive_address(key.expose())?;
-        let account_id = format!("{}:{}", chain.chain_id, address);
+        let account_id = wallet_account_id(&chain, &address);
         accounts.push(WalletAccount {
             account_id,
             address,
@@ -125,7 +128,7 @@ fn derive_all_accounts_from_keys(keys: &KeyPair) -> Result<Vec<WalletAccount>, O
         let address = signer.derive_address(key)?;
         let chain = default_chain_for_type(*ct);
         accounts.push(WalletAccount {
-            account_id: format!("{}:{}", chain.chain_id, address),
+            account_id: wallet_account_id(&chain, &address),
             address,
             chain_id: chain.chain_id.to_string(),
             derivation_path: String::new(),
@@ -274,15 +277,8 @@ pub fn import_wallet_mnemonic(
 /// Decode a hex-encoded key, stripping an optional `0x` prefix.
 fn decode_hex_key(hex_str: &str) -> Result<Vec<u8>, OwsLibError> {
     let trimmed = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-    let key = hex::decode(trimmed)
-        .map_err(|e| OwsLibError::InvalidInput(format!("invalid hex private key: {e}")))?;
-    if key.len() != 32 {
-        return Err(OwsLibError::InvalidInput(format!(
-            "private keys must be exactly 32 bytes, got {}",
-            key.len()
-        )));
-    }
-    Ok(key)
+    hex::decode(trimmed)
+        .map_err(|e| OwsLibError::InvalidInput(format!("invalid hex private key: {e}")))
 }
 
 /// Import a wallet from a hex-encoded private key.
@@ -756,449 +752,6 @@ pub fn sign_encode_and_broadcast(
     Ok(SendResult { tx_hash })
 }
 
-/// Send raw Atto units from a wallet account to an `atto://` address.
-#[allow(clippy::too_many_arguments)]
-pub fn atto_send_raw(
-    wallet: &str,
-    chain: &str,
-    to_address: &str,
-    amount_raw: &str,
-    passphrase: Option<&str>,
-    index: Option<u32>,
-    rpc_url: Option<&str>,
-    work_url: Option<&str>,
-    vault_path: Option<&Path>,
-) -> Result<AttoWalletOpResult, OwsLibError> {
-    let amount = parse_positive_atto_amount(amount_raw)?;
-    let receiver_public_key = atto_public_key_hex(to_address)?;
-    let ctx = atto_context(
-        wallet, chain, passphrase, index, rpc_url, work_url, vault_path,
-    )?;
-    let account = ctx.node.account_by_address(&ctx.address)?.ok_or_else(|| {
-        OwsLibError::InvalidInput(
-            "Atto send requires an opened account with confirmed state".into(),
-        )
-    })?;
-    let height = parse_atto_u64(&account.height, "account height")? + 1;
-    let balance = parse_atto_u64(&account.balance, "account balance")?
-        .checked_sub(amount)
-        .ok_or_else(|| OwsLibError::InvalidInput("insufficient Atto balance".into()))?;
-    let timestamp = atto_confirmed_timestamp_ms(&ctx.node)?;
-    let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
-
-    let block = AttoBlock::Send(AttoSendBlock {
-        network: ctx.network,
-        version: atto_block_version(account.version)?,
-        public_key: ctx.public_key,
-        height,
-        balance,
-        timestamp_ms: timestamp,
-        previous,
-        receiver_public_key: hex_to_32(&receiver_public_key, "receiver public key")?,
-        amount,
-    });
-    let transaction = sign_atto_block(
-        &ctx,
-        block,
-        serde_json::json!({
-            "type": "SEND",
-            "network": ctx.network_name,
-            "version": account.version,
-            "algorithm": "V1",
-            "publicKey": ctx.public_key_hex,
-            "height": height.to_string(),
-            "balance": balance.to_string(),
-            "timestamp": timestamp,
-            "address": ctx.address,
-            "previous": account.last_transaction_hash,
-            "receiverAlgorithm": "V1",
-            "receiverPublicKey": receiver_public_key,
-            "receiverAddress": to_address,
-            "amount": amount.to_string()
-        }),
-        timestamp,
-        &account.last_transaction_hash,
-    )?;
-    publish_atto_result(&ctx, &transaction, "SEND", height, balance, None)
-}
-
-/// Receive or open exactly one pending Atto receivable for a wallet account.
-pub fn atto_receive_one(
-    wallet: &str,
-    chain: &str,
-    passphrase: Option<&str>,
-    index: Option<u32>,
-    rpc_url: Option<&str>,
-    work_url: Option<&str>,
-    vault_path: Option<&Path>,
-) -> Result<AttoWalletOpResult, OwsLibError> {
-    let ctx = atto_context(
-        wallet, chain, passphrase, index, rpc_url, work_url, vault_path,
-    )?;
-    let mut receivables = ctx
-        .node
-        .list_receivables_by_public_key(&ctx.public_key_hex, None)?;
-    let receivable = receivables.drain(..).next().ok_or_else(|| {
-        OwsLibError::InvalidInput(format!("no Atto receivable found for {}", ctx.address))
-    })?;
-    let amount = parse_positive_atto_amount(&receivable.amount)?;
-    let timestamp = atto_confirmed_timestamp_ms(&ctx.node)?;
-    let send_hash = decode_atto_32(&receivable.hash, "receivable hash")?;
-
-    let maybe_account = ctx.node.account_by_address(&ctx.address)?;
-    let (block, block_json, height, balance, work_target, block_type) =
-        if let Some(account) = maybe_account {
-            let height = parse_atto_u64(&account.height, "account height")? + 1;
-            let balance = parse_atto_u64(&account.balance, "account balance")?
-                .checked_add(amount)
-                .ok_or_else(|| OwsLibError::InvalidInput("Atto balance overflow".into()))?;
-            let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
-            (
-                AttoBlock::Receive(AttoReceiveBlock {
-                    network: ctx.network,
-                    version: atto_block_version(account.version)?,
-                    public_key: ctx.public_key,
-                    height,
-                    balance,
-                    timestamp_ms: timestamp,
-                    previous,
-                    send_hash,
-                }),
-                serde_json::json!({
-                    "type": "RECEIVE",
-                    "network": ctx.network_name,
-                    "version": account.version,
-                    "algorithm": "V1",
-                    "publicKey": ctx.public_key_hex,
-                    "height": height.to_string(),
-                    "balance": balance.to_string(),
-                    "timestamp": timestamp,
-                    "address": ctx.address,
-                    "previous": account.last_transaction_hash,
-                    "sendHashAlgorithm": "V1",
-                    "sendHash": receivable.hash
-                }),
-                height,
-                balance,
-                account.last_transaction_hash,
-                "RECEIVE",
-            )
-        } else {
-            (
-                AttoBlock::Open(AttoOpenBlock {
-                    network: ctx.network,
-                    version: 0,
-                    public_key: ctx.public_key,
-                    balance: amount,
-                    timestamp_ms: timestamp,
-                    send_hash,
-                    representative_public_key: ctx.public_key,
-                }),
-                serde_json::json!({
-                    "type": "OPEN",
-                    "network": ctx.network_name,
-                    "version": 0,
-                    "algorithm": "V1",
-                    "publicKey": ctx.public_key_hex,
-                    "height": "1",
-                    "balance": amount.to_string(),
-                    "timestamp": timestamp,
-                    "address": ctx.address,
-                    "sendHashAlgorithm": "V1",
-                    "sendHash": receivable.hash,
-                    "representativeAlgorithm": "V1",
-                    "representativePublicKey": ctx.public_key_hex,
-                    "representativeAddress": ctx.address
-                }),
-                1,
-                amount,
-                ctx.public_key_hex.clone(),
-                "OPEN",
-            )
-        };
-
-    let transaction = sign_atto_block(&ctx, block, block_json, timestamp, &work_target)?;
-    publish_atto_result(
-        &ctx,
-        &transaction,
-        block_type,
-        height,
-        balance,
-        Some(receivable.hash),
-    )
-}
-
-/// Change the representative for an opened Atto account while preserving balance.
-#[allow(clippy::too_many_arguments)]
-pub fn atto_change_representative(
-    wallet: &str,
-    chain: &str,
-    representative_address: &str,
-    passphrase: Option<&str>,
-    index: Option<u32>,
-    rpc_url: Option<&str>,
-    work_url: Option<&str>,
-    vault_path: Option<&Path>,
-) -> Result<AttoWalletOpResult, OwsLibError> {
-    let representative_public_key = atto_public_key_hex(representative_address)?;
-    let ctx = atto_context(
-        wallet, chain, passphrase, index, rpc_url, work_url, vault_path,
-    )?;
-    let account = ctx.node.account_by_address(&ctx.address)?.ok_or_else(|| {
-        OwsLibError::InvalidInput(
-            "Atto representative change requires an opened account with confirmed state".into(),
-        )
-    })?;
-    let height = parse_atto_u64(&account.height, "account height")? + 1;
-    let balance = parse_atto_u64(&account.balance, "account balance")?;
-    let timestamp = atto_confirmed_timestamp_ms(&ctx.node)?;
-    let previous = decode_atto_32(&account.last_transaction_hash, "previous hash")?;
-
-    let block = AttoBlock::Change(AttoChangeBlock {
-        network: ctx.network,
-        version: atto_block_version(account.version)?,
-        public_key: ctx.public_key,
-        height,
-        balance,
-        timestamp_ms: timestamp,
-        previous,
-        representative_public_key: hex_to_32(
-            &representative_public_key,
-            "representative public key",
-        )?,
-    });
-    let transaction = sign_atto_block(
-        &ctx,
-        block,
-        serde_json::json!({
-            "type": "CHANGE",
-            "network": ctx.network_name,
-            "version": account.version,
-            "algorithm": "V1",
-            "publicKey": ctx.public_key_hex,
-            "height": height.to_string(),
-            "balance": balance.to_string(),
-            "timestamp": timestamp,
-            "address": ctx.address,
-            "previous": account.last_transaction_hash,
-            "representativeAlgorithm": "V1",
-            "representativePublicKey": representative_public_key,
-            "representativeAddress": representative_address
-        }),
-        timestamp,
-        &account.last_transaction_hash,
-    )?;
-    publish_atto_result(&ctx, &transaction, "CHANGE", height, balance, None)
-}
-
-struct AttoOpContext {
-    node: AttoNodeClient,
-    work: AttoWorkServerClient,
-    network_name: &'static str,
-    network: AttoNetwork,
-    address: String,
-    public_key: [u8; 32],
-    public_key_hex: String,
-    private_key: SecretBytes,
-}
-
-fn atto_context(
-    wallet: &str,
-    chain: &str,
-    passphrase: Option<&str>,
-    index: Option<u32>,
-    rpc_url: Option<&str>,
-    work_url: Option<&str>,
-    vault_path: Option<&Path>,
-) -> Result<AttoOpContext, OwsLibError> {
-    let chain = parse_chain(chain)?;
-    if chain.chain_type != ChainType::Atto {
-        return Err(OwsLibError::InvalidInput(format!(
-            "Atto wallet operations require an Atto chain, got {}",
-            chain.chain_id
-        )));
-    }
-    let (network_name, network, network_key) = atto_network(chain.chain_id)?;
-    let node_url = resolve_required_url(chain.chain_id, chain.chain_type, rpc_url, "Atto RPC")?;
-    let work_url = resolve_atto_work_url(network_key, work_url)?;
-    let private_key = decrypt_signing_key(
-        wallet,
-        ChainType::Atto,
-        passphrase.unwrap_or(""),
-        index,
-        vault_path,
-    )?;
-    let signer = signer_for_chain(ChainType::Atto);
-    let address = signer.derive_address(private_key.expose())?;
-    let public_key = ows_signer::chains::atto::atto_pubkey_from_address(&address)?;
-    let public_key_hex = hex::encode_upper(public_key);
-    Ok(AttoOpContext {
-        node: AttoNodeClient::new(node_url),
-        work: AttoWorkServerClient::new(work_url),
-        network_name,
-        network,
-        address,
-        public_key,
-        public_key_hex,
-        private_key,
-    })
-}
-
-fn atto_block_version(version: u32) -> Result<u16, OwsLibError> {
-    u16::try_from(version).map_err(|_| {
-        OwsLibError::InvalidInput(format!("unsupported Atto block version: {version}"))
-    })
-}
-
-fn sign_atto_block(
-    ctx: &AttoOpContext,
-    block: AttoBlock,
-    block_json: serde_json::Value,
-    timestamp: i64,
-    work_target: &str,
-) -> Result<AttoTransaction, OwsLibError> {
-    let bytes = block.to_buffer();
-    let signer = signer_for_chain(ChainType::Atto);
-    let signature = signer.sign_transaction(ctx.private_key.expose(), &bytes)?;
-    let work = ctx
-        .work
-        .work(&AttoWorkRequest {
-            network: ctx.network_name.to_string(),
-            timestamp,
-            target: work_target.to_string(),
-        })?
-        .work;
-    Ok(AttoTransaction {
-        block: block_json,
-        signature: hex::encode_upper(signature.signature),
-        work,
-        address: ctx.address.clone(),
-    })
-}
-
-fn publish_atto_result(
-    ctx: &AttoOpContext,
-    transaction: &AttoTransaction,
-    block_type: &str,
-    height: u64,
-    balance: u64,
-    receivable_hash: Option<String>,
-) -> Result<AttoWalletOpResult, OwsLibError> {
-    let response = ctx.node.publish_transaction(transaction)?;
-    let status = match response.status {
-        AttoPublishStatus::Published => "published",
-        AttoPublishStatus::PublishedAndStreamed => "published_and_streamed",
-    };
-    Ok(AttoWalletOpResult {
-        status: status.to_string(),
-        block_type: block_type.to_string(),
-        address: ctx.address.clone(),
-        height: height.to_string(),
-        balance: balance.to_string(),
-        hash: response.hash,
-        receivable_hash,
-    })
-}
-
-fn parse_positive_atto_amount(amount: &str) -> Result<u64, OwsLibError> {
-    if amount.is_empty() || !amount.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(OwsLibError::InvalidInput(
-            "Atto amount must be a positive integer in raw units".into(),
-        ));
-    }
-    let parsed = amount.parse::<u64>().map_err(|e| {
-        OwsLibError::InvalidInput(format!("Atto amount must fit in u64 raw units: {e}"))
-    })?;
-    if parsed == 0 {
-        return Err(OwsLibError::InvalidInput(
-            "Atto amount must be greater than zero".into(),
-        ));
-    }
-    Ok(parsed)
-}
-
-fn parse_atto_u64(value: &str, label: &str) -> Result<u64, OwsLibError> {
-    value
-        .parse::<u64>()
-        .map_err(|e| OwsLibError::InvalidInput(format!("invalid Atto {label}: {e}")))
-}
-
-fn atto_public_key_hex(address: &str) -> Result<String, OwsLibError> {
-    Ok(hex::encode_upper(
-        ows_signer::chains::atto::atto_pubkey_from_address(address)?,
-    ))
-}
-
-fn decode_atto_32(hex_value: &str, label: &str) -> Result<[u8; 32], OwsLibError> {
-    hex_to_32(hex_value, label)
-}
-
-fn hex_to_32(hex_value: &str, label: &str) -> Result<[u8; 32], OwsLibError> {
-    let value = hex_value.strip_prefix("0x").unwrap_or(hex_value);
-    let bytes = hex::decode(value)
-        .map_err(|e| OwsLibError::InvalidInput(format!("invalid Atto {label}: {e}")))?;
-    bytes.try_into().map_err(|bytes: Vec<u8>| {
-        OwsLibError::InvalidInput(format!(
-            "invalid Atto {label}: expected 32 bytes, got {}",
-            bytes.len()
-        ))
-    })
-}
-
-fn atto_network(chain_id: &str) -> Result<(&'static str, AttoNetwork, &'static str), OwsLibError> {
-    match chain_id {
-        "atto:live" => Ok(("LIVE", AttoNetwork::Live, "live")),
-        "atto:beta" => Ok(("BETA", AttoNetwork::Beta, "beta")),
-        "atto:dev" => Ok(("DEV", AttoNetwork::Dev, "dev")),
-        "atto:local" => Ok(("LOCAL", AttoNetwork::Local, "local")),
-        other => Err(OwsLibError::InvalidInput(format!(
-            "unsupported Atto chain id: {other}"
-        ))),
-    }
-}
-
-fn resolve_required_url(
-    chain_id: &str,
-    chain_type: ChainType,
-    explicit: Option<&str>,
-    label: &str,
-) -> Result<String, OwsLibError> {
-    let url = resolve_rpc_url(chain_id, chain_type, explicit)?;
-    if url.trim().is_empty() {
-        return Err(OwsLibError::InvalidInput(format!(
-            "{label} URL is not configured for {chain_id}"
-        )));
-    }
-    Ok(url)
-}
-
-fn resolve_atto_work_url(network: &str, explicit: Option<&str>) -> Result<String, OwsLibError> {
-    if let Some(url) = explicit {
-        return Ok(url.to_string());
-    }
-    let key = format!("atto-work:{network}");
-    let config = Config::load_or_default();
-    let defaults = Config::default_rpc();
-    let url = config
-        .rpc
-        .get(&key)
-        .or_else(|| defaults.get(&key))
-        .ok_or_else(|| OwsLibError::InvalidInput(format!("no Atto work URL configured for {key}")))?
-        .clone();
-    if url.trim().is_empty() {
-        return Err(OwsLibError::InvalidInput(format!(
-            "Atto work URL is not configured for {key}"
-        )));
-    }
-    Ok(url)
-}
-
-fn atto_confirmed_timestamp_ms(node: &AttoNodeClient) -> Result<i64, OwsLibError> {
-    let client_instant = chrono::Utc::now().timestamp_millis();
-    let response = node.time_difference(client_instant)?;
-    Ok(response.server_instant)
-}
-
 // --- internal helpers ---
 
 /// Decrypt a wallet and return the private key for the given chain.
@@ -1281,21 +834,10 @@ fn broadcast(chain: ChainType, rpc_url: &str, signed_bytes: &[u8]) -> Result<Str
 }
 
 fn broadcast_atto(rpc_url: &str, signed_bytes: &[u8]) -> Result<String, OwsLibError> {
-    let transaction =
+    let mut transaction =
         ows_signer::chains::atto::atto_signed_transaction_to_api_json_value(signed_bytes)?;
     let tx_hash = ows_signer::chains::atto::atto_signed_transaction_hash_hex(signed_bytes)?;
 
-    let work = transaction
-        .get("work")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            OwsLibError::InvalidInput("missing Atto work in signed transaction payload".into())
-        })?;
-    if work.trim().is_empty() || work == "0000000000000000" {
-        return Err(OwsLibError::InvalidInput(
-            "missing Atto work in signed transaction payload".into(),
-        ));
-    }
     if transaction
         .get("signature")
         .and_then(serde_json::Value::as_str)
@@ -1315,9 +857,144 @@ fn broadcast_atto(rpc_url: &str, signed_bytes: &[u8]) -> Result<String, OwsLibEr
         ));
     }
 
-    let response =
-        crate::atto_rpc::AttoNodeClient::new(rpc_url).publish_transaction_value(&transaction)?;
-    Ok(response.hash.unwrap_or(tx_hash))
+    if transaction
+        .get("work")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(is_missing_atto_work)
+    {
+        let work = generate_atto_work(&transaction)?;
+        transaction
+            .as_object_mut()
+            .ok_or_else(|| {
+                OwsLibError::InvalidInput("Atto transaction payload must be a JSON object".into())
+            })?
+            .insert("work".to_string(), serde_json::Value::String(work));
+    }
+
+    let publish_payload = atto_node_transaction_payload(&transaction)?;
+    let streamed_hash = crate::atto_rpc::AttoNodeClient::new(rpc_url)
+        .publish_transaction_value_stream(&publish_payload)?;
+    Ok(streamed_hash.unwrap_or(tx_hash))
+}
+
+fn atto_node_transaction_payload(
+    transaction: &serde_json::Value,
+) -> Result<serde_json::Value, OwsLibError> {
+    let mut block = transaction.clone();
+    let object = block.as_object_mut().ok_or_else(|| {
+        OwsLibError::InvalidInput("Atto transaction payload must be a JSON object".into())
+    })?;
+    let signature = object
+        .remove("signature")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .ok_or_else(|| {
+            OwsLibError::InvalidInput("missing Atto signature in signed transaction payload".into())
+        })?;
+    let work = object
+        .remove("work")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .ok_or_else(|| {
+            OwsLibError::InvalidInput("missing Atto work in signed transaction payload".into())
+        })?;
+
+    Ok(serde_json::json!({
+        "block": block,
+        "signature": signature,
+        "work": work,
+    }))
+}
+
+fn is_missing_atto_work(work: &str) -> bool {
+    let trimmed = work.trim();
+    trimmed.is_empty() || trimmed == "0000000000000000"
+}
+
+fn generate_atto_work(transaction: &serde_json::Value) -> Result<String, OwsLibError> {
+    let network = atto_transaction_string_field(transaction, "network")?;
+    let timestamp = atto_transaction_i64_field(transaction, "timestamp")?;
+    let target = atto_work_target(transaction)?;
+    let work_url = resolve_atto_work_url(network)?;
+
+    Ok(AttoWorkServerClient::new(work_url)
+        .work(&AttoWorkRequest {
+            network: network.to_string(),
+            timestamp,
+            target,
+        })?
+        .work)
+}
+
+fn atto_work_target(transaction: &serde_json::Value) -> Result<String, OwsLibError> {
+    let block_type = atto_transaction_string_field(transaction, "type")?;
+    let field = if block_type.eq_ignore_ascii_case("OPEN") {
+        "publicKey"
+    } else {
+        "previous"
+    };
+    atto_transaction_string_field(transaction, field).map(str::to_string)
+}
+
+fn atto_transaction_string_field<'a>(
+    transaction: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a str, OwsLibError> {
+    transaction
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            OwsLibError::InvalidInput(format!(
+                "missing Atto {field} in signed transaction payload"
+            ))
+        })
+}
+
+fn atto_transaction_i64_field(
+    transaction: &serde_json::Value,
+    field: &str,
+) -> Result<i64, OwsLibError> {
+    let value = transaction.get(field).ok_or_else(|| {
+        OwsLibError::InvalidInput(format!(
+            "missing Atto {field} in signed transaction payload"
+        ))
+    })?;
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+        .ok_or_else(|| {
+            OwsLibError::InvalidInput(format!(
+                "invalid Atto {field} in signed transaction payload"
+            ))
+        })
+}
+
+fn resolve_atto_work_url(network: &str) -> Result<String, OwsLibError> {
+    let network_key = match network.to_ascii_uppercase().as_str() {
+        "LIVE" => "live",
+        "BETA" => "beta",
+        "DEV" => "dev",
+        "LOCAL" => "local",
+        other => {
+            return Err(OwsLibError::InvalidInput(format!(
+                "unsupported Atto network in signed transaction payload: {other}"
+            )));
+        }
+    };
+    let key = format!("atto-work:{network_key}");
+    let config = Config::load_or_default();
+    let defaults = Config::default_rpc();
+    let url = config
+        .rpc
+        .get(&key)
+        .or_else(|| defaults.get(&key))
+        .ok_or_else(|| OwsLibError::InvalidInput(format!("no Atto work URL configured for {key}")))?
+        .clone();
+    if url.trim().is_empty() {
+        return Err(OwsLibError::InvalidInput(format!(
+            "Atto work URL is not configured for {key}"
+        )));
+    }
+    Ok(url)
 }
 
 fn broadcast_xrpl(rpc_url: &str, signed_bytes: &[u8]) -> Result<String, OwsLibError> {
@@ -1588,9 +1265,6 @@ fn extract_json_field(json_str: &str, field: &str) -> Result<String, OwsLibError
 mod tests {
     use super::*;
     use ows_core::OwsError;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
 
     // ---- helpers ----
 
@@ -1704,6 +1378,22 @@ mod tests {
         payload
     }
 
+    fn sample_atto_unsigned_live_payload_without_work() -> Vec<u8> {
+        let block = ows_signer::chains::atto::AttoBlock::Receive(
+            ows_signer::chains::atto::AttoReceiveBlock {
+                network: ows_signer::chains::atto::AttoNetwork::Live,
+                version: 0,
+                public_key: [0x11; 32],
+                height: 2,
+                balance: 42,
+                timestamp_ms: 1_700_000_000_000,
+                previous: [0x22; 32],
+                send_hash: [0x33; 32],
+            },
+        );
+        block.to_buffer()
+    }
+
     fn sample_atto_signed_payload() -> Vec<u8> {
         let mut payload = sample_atto_unsigned_payload_with_work();
         let work = payload.split_off(payload.len() - 8);
@@ -1715,6 +1405,18 @@ mod tests {
     fn sample_atto_hash() -> String {
         ows_signer::chains::atto::atto_signed_transaction_hash_hex(&sample_atto_signed_payload())
             .unwrap()
+    }
+
+    fn sample_atto_stream_response() -> String {
+        let mut transaction = ows_signer::chains::atto::atto_signed_transaction_to_api_json_value(
+            &sample_atto_signed_payload(),
+        )
+        .unwrap();
+        transaction.as_object_mut().unwrap().insert(
+            "hash".to_string(),
+            serde_json::Value::String(sample_atto_hash()),
+        );
+        format!("{transaction}\n")
     }
 
     fn save_allowed_chains_policy(vault: &Path, id: &str, chain_ids: Vec<String>) {
@@ -1730,321 +1432,6 @@ mod tests {
         };
 
         crate::policy_store::save_policy(&policy, Some(vault)).unwrap();
-    }
-
-    fn atto_account_json(address: &str, balance: &str, height: &str) -> serde_json::Value {
-        let public_key = atto_public_key_hex(address).unwrap();
-        serde_json::json!({
-            "publicKey": public_key,
-            "network": "LIVE",
-            "version": 0,
-            "algorithm": "V1",
-            "height": height,
-            "balance": balance,
-            "lastTransactionHash": TEST_HASH,
-            "lastTransactionTimestamp": 1767390950976_i64,
-            "representativeAlgorithm": "V1",
-            "representativePublicKey": public_key,
-            "representativeAddress": address,
-            "address": address
-        })
-    }
-
-    fn atto_receivable_json(address: &str, amount: &str) -> serde_json::Value {
-        let public_key = atto_public_key_hex(address).unwrap();
-        serde_json::json!({
-            "network": "LIVE",
-            "hash": TEST_HASH,
-            "version": 0,
-            "algorithm": "V1",
-            "publicKey": public_key,
-            "timestamp": 1767390950976_i64,
-            "receiverAlgorithm": "V1",
-            "receiverPublicKey": public_key,
-            "amount": amount,
-            "receiverAddress": address,
-            "address": address
-        })
-    }
-
-    fn atto_instant_json() -> String {
-        r#"{"clientInstant":1767390950000,"serverInstant":1767390950123,"differenceMillis":123}"#
-            .to_string()
-    }
-
-    fn serve_sequence(
-        responses: Vec<(u16, &'static str, String)>,
-    ) -> (String, thread::JoinHandle<Vec<String>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = thread::spawn(move || {
-            let mut requests = Vec::new();
-            for (status, content_type, body) in responses {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut buf = [0_u8; 32 * 1024];
-                let n = stream.read(&mut buf).unwrap();
-                requests.push(String::from_utf8_lossy(&buf[..n]).to_string());
-                let reason = match status {
-                    200 => "OK",
-                    400 => "Bad Request",
-                    404 => "Not Found",
-                    _ => "Status",
-                };
-                let response = format!(
-                    "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(), body
-                );
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-            requests
-        });
-        (format!("http://{addr}"), handle)
-    }
-
-    #[test]
-    fn atto_send_raw_fetches_state_signs_work_and_publishes() {
-        let dir = tempfile::tempdir().unwrap();
-        let wallet = save_privkey_wallet("atto-send", TEST_PRIVKEY, "", dir.path());
-        let address = wallet
-            .accounts
-            .iter()
-            .find(|account| account.chain_id == "atto:live")
-            .unwrap()
-            .address
-            .clone();
-        let account = atto_account_json(&address, "100", "7").to_string();
-        let (node_url, node_handle) = serve_sequence(vec![
-            (200, "application/json", account),
-            (200, "application/json", atto_instant_json()),
-            (200, "application/json", String::new()),
-        ]);
-        let (work_url, work_handle) = serve_sequence(vec![(
-            200,
-            "application/json",
-            r#"{"work":"8E9C4A839AB702AF"}"#.to_string(),
-        )]);
-
-        let result = atto_send_raw(
-            "atto-send",
-            "atto",
-            &address,
-            "9",
-            None,
-            None,
-            Some(&node_url),
-            Some(&work_url),
-            Some(dir.path()),
-        )
-        .unwrap();
-
-        assert_eq!(result.block_type, "SEND");
-        assert_eq!(result.height, "8");
-        assert_eq!(result.balance, "91");
-        let node_requests = node_handle.join().unwrap();
-        let work_requests = work_handle.join().unwrap();
-        assert!(node_requests[0].starts_with("POST /accounts HTTP/1.1"));
-        assert!(node_requests[1].starts_with("GET /instants/"));
-        assert!(node_requests[2].starts_with("POST /transactions HTTP/1.1"));
-        assert!(node_requests[2].contains("\"type\":\"SEND\""));
-        assert!(node_requests[2].contains("\"height\":\"8\""));
-        assert!(node_requests[2].contains("\"balance\":\"91\""));
-        assert!(node_requests[2].contains(
-            "\"previous\":\"9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C\""
-        ));
-        assert!(work_requests[0].contains(
-            "\"target\":\"9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C\""
-        ));
-    }
-
-    #[test]
-    fn atto_receive_one_opens_first_receivable_for_unopened_account() {
-        let dir = tempfile::tempdir().unwrap();
-        let wallet = save_privkey_wallet("atto-open", TEST_PRIVKEY, "", dir.path());
-        let address = wallet
-            .accounts
-            .iter()
-            .find(|account| account.chain_id == "atto:live")
-            .unwrap()
-            .address
-            .clone();
-        let public_key = atto_public_key_hex(&address).unwrap();
-        let receivables = format!("{}\n", atto_receivable_json(&address, "55"));
-        let (node_url, node_handle) = serve_sequence(vec![
-            (200, "application/x-ndjson", receivables),
-            (200, "application/json", atto_instant_json()),
-            (200, "application/json", "[]".to_string()),
-            (200, "application/json", String::new()),
-        ]);
-        let (work_url, work_handle) = serve_sequence(vec![(
-            200,
-            "application/json",
-            r#"{"work":"8E9C4A839AB702AF"}"#.to_string(),
-        )]);
-
-        let result = atto_receive_one(
-            "atto-open",
-            "atto",
-            None,
-            None,
-            Some(&node_url),
-            Some(&work_url),
-            Some(dir.path()),
-        )
-        .unwrap();
-
-        assert_eq!(result.block_type, "OPEN");
-        assert_eq!(result.height, "1");
-        assert_eq!(result.balance, "55");
-        assert_eq!(result.receivable_hash.as_deref(), Some(TEST_HASH));
-        let node_requests = node_handle.join().unwrap();
-        let work_requests = work_handle.join().unwrap();
-        assert!(node_requests[0].starts_with(&format!(
-            "GET /accounts/{public_key}/receivables/stream HTTP/1.1"
-        )));
-        assert!(node_requests[1].starts_with("GET /instants/"));
-        assert!(node_requests[3].contains("\"type\":\"OPEN\""));
-        assert!(node_requests[3].contains(&format!("\"sendHash\":\"{TEST_HASH}\"")));
-        assert!(work_requests[0].contains(&format!("\"target\":\"{public_key}\"")));
-    }
-
-    #[test]
-    fn atto_receive_one_returns_clear_no_receivable_error() {
-        let dir = tempfile::tempdir().unwrap();
-        save_privkey_wallet("atto-none", TEST_PRIVKEY, "", dir.path());
-        let (node_url, node_handle) =
-            serve_sequence(vec![(200, "application/x-ndjson", String::new())]);
-        let (work_url, work_handle) = serve_sequence(Vec::new());
-
-        let err = atto_receive_one(
-            "atto-none",
-            "atto",
-            None,
-            None,
-            Some(&node_url),
-            Some(&work_url),
-            Some(dir.path()),
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("no Atto receivable found"));
-        let node_requests = node_handle.join().unwrap();
-        assert_eq!(node_requests.len(), 1);
-        let work_requests = work_handle.join().unwrap();
-        assert!(work_requests.is_empty());
-    }
-
-    #[test]
-    fn atto_send_raw_surfaces_stale_height_previous_rpc_rejection() {
-        let dir = tempfile::tempdir().unwrap();
-        let wallet = save_privkey_wallet("atto-stale", TEST_PRIVKEY, "", dir.path());
-        let address = wallet
-            .accounts
-            .iter()
-            .find(|account| account.chain_id == "atto:live")
-            .unwrap()
-            .address
-            .clone();
-        let account = atto_account_json(&address, "100", "7").to_string();
-        let (node_url, node_handle) = serve_sequence(vec![
-            (200, "application/json", account),
-            (200, "application/json", atto_instant_json()),
-            (
-                400,
-                "application/json",
-                r#"{"error":"stale height or previous"}"#.to_string(),
-            ),
-        ]);
-        let (work_url, work_handle) = serve_sequence(vec![(
-            200,
-            "application/json",
-            r#"{"work":"8E9C4A839AB702AF"}"#.to_string(),
-        )]);
-
-        let err = atto_send_raw(
-            "atto-stale",
-            "atto",
-            &address,
-            "9",
-            None,
-            None,
-            Some(&node_url),
-            Some(&work_url),
-            Some(dir.path()),
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("stale height or previous"));
-        assert_eq!(node_handle.join().unwrap().len(), 3);
-        assert_eq!(work_handle.join().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn atto_change_representative_preserves_balance_and_uses_confirmed_state() {
-        let dir = tempfile::tempdir().unwrap();
-        let wallet = save_privkey_wallet("atto-change", TEST_PRIVKEY, "", dir.path());
-        let address = wallet
-            .accounts
-            .iter()
-            .find(|account| account.chain_id == "atto:live")
-            .unwrap()
-            .address
-            .clone();
-        let account = atto_account_json(&address, "100", "7").to_string();
-        let (node_url, node_handle) = serve_sequence(vec![
-            (200, "application/json", account),
-            (200, "application/json", atto_instant_json()),
-            (200, "application/json", String::new()),
-        ]);
-        let (work_url, work_handle) = serve_sequence(vec![(
-            200,
-            "application/json",
-            r#"{"work":"8E9C4A839AB702AF"}"#.to_string(),
-        )]);
-
-        let result = atto_change_representative(
-            "atto-change",
-            "atto",
-            &address,
-            None,
-            None,
-            Some(&node_url),
-            Some(&work_url),
-            Some(dir.path()),
-        )
-        .unwrap();
-
-        assert_eq!(result.block_type, "CHANGE");
-        assert_eq!(result.height, "8");
-        assert_eq!(result.balance, "100");
-        let node_requests = node_handle.join().unwrap();
-        let work_requests = work_handle.join().unwrap();
-        assert!(node_requests[1].starts_with("GET /instants/"));
-        assert!(node_requests[2].contains("\"type\":\"CHANGE\""));
-        assert!(node_requests[2].contains("\"height\":\"8\""));
-        assert!(node_requests[2].contains("\"balance\":\"100\""));
-        assert!(node_requests[2].contains(&format!("\"previous\":\"{TEST_HASH}\"")));
-        assert!(work_requests[0].contains(&format!("\"target\":\"{TEST_HASH}\"")));
-    }
-
-    #[test]
-    fn atto_send_raw_rejects_invalid_amount_before_rpc() {
-        let dir = tempfile::tempdir().unwrap();
-        save_privkey_wallet("atto-invalid-amount", TEST_PRIVKEY, "", dir.path());
-
-        let err = atto_send_raw(
-            "atto-invalid-amount",
-            "atto",
-            "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw",
-            "0",
-            None,
-            None,
-            Some("http://127.0.0.1:1"),
-            Some("http://127.0.0.1:1"),
-            Some(dir.path()),
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("greater than zero"));
     }
 
     // ================================================================
@@ -2152,7 +1539,10 @@ mod tests {
             .expect("Atto account should be derived for new wallets");
         assert!(atto_account.address.starts_with("atto://"));
         assert_eq!(atto_account.derivation_path, "m/44'/1869902945'/0'");
-        let expected_atto_account_id = format!("atto:live:{}", atto_account.address);
+        let expected_atto_account_id = format!(
+            "atto:live:{}",
+            atto_account.address.strip_prefix("atto://").unwrap()
+        );
 
         let stored = vault::load_wallet_by_name_or_id("w1", Some(v1.path())).unwrap();
         let stored_atto = stored
@@ -2162,8 +1552,9 @@ mod tests {
             .expect("Atto account should persist in wallet JSON");
         assert_eq!(
             stored_atto.account_id, expected_atto_account_id,
-            "Atto account IDs must persist as chain_id:atto://..."
+            "Atto account IDs must persist without duplicating the atto:// address scheme"
         );
+        assert!(stored_atto.address.starts_with("atto://"));
 
         // Export mnemonic
         let phrase = export_wallet("w1", None, Some(v1.path())).unwrap();
@@ -2787,16 +2178,19 @@ mod tests {
     #[test]
     fn atto_broadcast_posts_transaction_json_and_returns_payload_hash() {
         let payload = sample_atto_signed_payload();
-        let (base_url, handle) = serve_once(200, "application/json", "");
+        let response = sample_atto_stream_response();
+        let (base_url, handle) = serve_once(200, "application/x-ndjson", &response);
 
         let tx_hash = broadcast(ChainType::Atto, &base_url, &payload).unwrap();
         let request = handle.join().unwrap();
 
         assert_eq!(tx_hash, sample_atto_hash());
         assert!(
-            request.starts_with("POST /transactions HTTP/1.1"),
+            request.starts_with("POST /transactions/stream HTTP/1.1"),
             "{request}"
         );
+        assert!(request.contains("\"block\":{"), "{request}");
+        assert!(request.contains("\"type\":\"RECEIVE\""), "{request}");
         assert!(
             request.contains("\"work\":\"4444444444444444\""),
             "{request}"
@@ -2808,7 +2202,8 @@ mod tests {
     #[test]
     fn sign_encode_and_broadcast_atto_uses_shared_library_path() {
         let payload = sample_atto_unsigned_payload_with_work();
-        let (base_url, handle) = serve_once(200, "application/json", "");
+        let response = sample_atto_stream_response();
+        let (base_url, handle) = serve_once(200, "application/x-ndjson", &response);
         let private_key = hex::decode(TEST_PRIVKEY).unwrap();
 
         let result =
@@ -2818,11 +2213,80 @@ mod tests {
 
         assert_eq!(result.tx_hash, sample_atto_hash());
         assert!(
-            request.starts_with("POST /transactions HTTP/1.1"),
+            request.starts_with("POST /transactions/stream HTTP/1.1"),
             "{request}"
         );
+        assert!(request.contains("\"block\":{"), "{request}");
+        assert!(request.contains("\"type\":\"RECEIVE\""), "{request}");
         assert!(request.contains("\"signature\":\""), "{request}");
         assert!(request.contains("\"address\":\"atto://"), "{request}");
+    }
+
+    #[test]
+    fn sign_encode_and_broadcast_atto_generates_missing_work_before_publish() {
+        let payload = sample_atto_unsigned_live_payload_without_work();
+        let response = format!("{}\n", serde_json::json!({ "hash": TEST_HASH }));
+        let (node_url, node_handle) = serve_once(200, "application/x-ndjson", &response);
+        let (work_url, work_handle) =
+            serve_once(200, "application/json", r#"{"work":"8E9C4A839AB702AF"}"#);
+        let dir = tempfile::tempdir().unwrap();
+        let ows_dir = dir.path().join(".ows");
+        std::fs::create_dir_all(&ows_dir).unwrap();
+        std::fs::write(
+            ows_dir.join("config.json"),
+            serde_json::json!({
+                "vault_path": ows_dir,
+                "rpc": { "atto-work:live": work_url },
+                "plugins": {}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", dir.path());
+        let private_key = hex::decode(TEST_PRIVKEY).unwrap();
+
+        let result =
+            sign_encode_and_broadcast(&private_key, "atto:live", &payload, Some(&node_url))
+                .unwrap();
+
+        if let Some(home) = old_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let work_request = work_handle.join().unwrap();
+        let node_request = node_handle.join().unwrap();
+
+        assert_eq!(result.tx_hash, TEST_HASH);
+        assert!(
+            work_request.starts_with("POST /works HTTP/1.1"),
+            "{work_request}"
+        );
+        assert!(
+            work_request.contains("\"network\":\"LIVE\""),
+            "{work_request}"
+        );
+        assert!(
+            work_request.contains(&format!(
+                "\"target\":\"{}\"",
+                "22".repeat(32).to_uppercase()
+            )),
+            "{work_request}"
+        );
+        assert!(
+            node_request.starts_with("POST /transactions/stream HTTP/1.1"),
+            "{node_request}"
+        );
+        assert!(node_request.contains("\"block\":{"), "{node_request}");
+        assert!(
+            node_request.contains("\"type\":\"RECEIVE\""),
+            "{node_request}"
+        );
+        assert!(
+            node_request.contains("\"work\":\"8E9C4A839AB702AF\""),
+            "{node_request}"
+        );
     }
 
     #[test]
@@ -2835,7 +2299,7 @@ mod tests {
         let request = handle.join().unwrap();
 
         assert!(
-            request.starts_with("POST /transactions HTTP/1.1"),
+            request.starts_with("POST /transactions/stream HTTP/1.1"),
             "{request}"
         );
         assert!(err.to_string().contains("Atto HTTP 422"), "{err}");
@@ -3308,9 +2772,13 @@ mod tests {
             .iter()
             .find(|acct| acct.chain_id == "atto:live")
             .expect("Atto account should persist for private-key imports");
+        assert!(stored_atto.address.starts_with("atto://"));
         assert_eq!(
             stored_atto.account_id,
-            format!("atto:live:{}", expected_atto)
+            format!(
+                "atto:live:{}",
+                expected_atto.strip_prefix("atto://").unwrap()
+            )
         );
 
         let atto_sig = sign_message(

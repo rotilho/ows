@@ -297,7 +297,7 @@ impl AttoBlock {
                 "version": block.version,
                 "algorithm": "V1",
                 "publicKey": hex::encode_upper(block.public_key),
-                "balance": block.balance.to_string(),
+                "balance": block.balance,
                 "timestamp": block.timestamp_ms,
                 "sendHashAlgorithm": "V1",
                 "sendHash": hex::encode_upper(block.send_hash),
@@ -314,7 +314,7 @@ impl AttoBlock {
                 "algorithm": "V1",
                 "publicKey": hex::encode_upper(block.public_key),
                 "height": block.height,
-                "balance": block.balance.to_string(),
+                "balance": block.balance,
                 "timestamp": block.timestamp_ms,
                 "previous": hex::encode_upper(block.previous),
                 "sendHashAlgorithm": "V1",
@@ -328,12 +328,12 @@ impl AttoBlock {
                 "algorithm": "V1",
                 "publicKey": hex::encode_upper(block.public_key),
                 "height": block.height,
-                "balance": block.balance.to_string(),
+                "balance": block.balance,
                 "timestamp": block.timestamp_ms,
                 "previous": hex::encode_upper(block.previous),
                 "receiverAlgorithm": "V1",
                 "receiverPublicKey": hex::encode_upper(block.receiver_public_key),
-                "amount": block.amount.to_string(),
+                "amount": block.amount,
                 "address": atto_address(&block.public_key),
                 "receiverAddress": atto_address(&block.receiver_public_key),
             }),
@@ -344,7 +344,7 @@ impl AttoBlock {
                 "algorithm": "V1",
                 "publicKey": hex::encode_upper(block.public_key),
                 "height": block.height,
-                "balance": block.balance.to_string(),
+                "balance": block.balance,
                 "timestamp": block.timestamp_ms,
                 "previous": hex::encode_upper(block.previous),
                 "representativeAlgorithm": "V1",
@@ -814,8 +814,8 @@ mod tests {
 
     #[test]
     fn address_decoder_accepts_contract_example() {
-        // Example from docs/09-atto-integration-contract.md. No source private key
-        // was published with it, so the test only verifies address decoding.
+        // Public Atto address example without source private key, so this only
+        // verifies address decoding.
         let address = "atto://aaferyy3quqiyugpambc452bu2oqh7hrcazz4vnvem2meaa6thwf4vkiuiwyw";
         let pubkey = atto_pubkey_from_address(address).unwrap();
         assert_eq!(pubkey.len(), 32);
@@ -927,6 +927,7 @@ mod tests {
             assert_eq!(json["algorithm"], "V1");
             assert_eq!(json["version"], 0);
             assert!(json.get("address").is_some());
+            assert!(json["balance"].is_number());
         }
     }
 

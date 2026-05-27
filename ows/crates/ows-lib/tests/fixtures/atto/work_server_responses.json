@@ -1,9 +1,0 @@
-{
-  "request": {
-    "network": "LIVE",
-    "timestamp": 1767390950000,
-    "target": "9072A5DB95CF7866F9AF4CC4C12C01F8E1DF903A6A0660EF62986A4B6191BD0C"
-  },
-  "success": { "work": "8E9C4A839AB702AF" },
-  "failure": { "error": "work unavailable" }
-}
